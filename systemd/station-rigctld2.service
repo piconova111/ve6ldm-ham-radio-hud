@@ -1,0 +1,10 @@
+[Unit]
+Description=Second radio link (Hamlib rigctld)
+
+[Service]
+ExecStart=%h/station/app/bin/rigctld.sh radio2
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

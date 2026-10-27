@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tester checklist</title>
+<link rel="stylesheet" href="/static/checklist.css">
+</head>
+<body>
+<header class="head">
+  <div class="kicker" id="kicker">Station display</div>
+  <h1>Tester checklist</h1>
+  <p class="intro">Hi <span id="who">there</span>! Here's everything on your station display, where to find it and how to try it. Tick <b>Found it</b> when you've found it and <b>Tried it</b> once you've used it, then say whether you like it or want a change. Write anything at all in the notes. Your answers save by themselves<span id="helper-line"></span>.</p>
+  <div class="progress">
+    <div class="bar" aria-hidden="true"><span id="bar-fill"></span></div>
+    <p id="progress-text" role="status">Loading the checklist…</p>
+  </div>
+  <div class="filters" role="group" aria-label="Show">
+    <button type="button" data-show="all" aria-pressed="true">Everything</button>
+    <button type="button" data-show="todo" aria-pressed="false">Still to try</button>
+    <button type="button" data-show="change" aria-pressed="false">Needs a change</button>
+  </div>
+</header>
+
+<main id="list"></main>
+<p class="empty" id="empty" hidden></p>
+
+<section class="general" id="general-box" hidden>
+  <h2><label for="general">Anything else?</label></h2>
+  <p>Ideas, things you'd like it to do, or anything that got in the way.</p>
+  <textarea id="general" rows="5" maxlength="2000"></textarea>
+  <p class="saved" id="general-saved" aria-live="polite"></p>
+</section>
+
+<footer class="foot">Everything is saved on the station computer as you go. Close this window whenever you like; your answers are kept.</footer>
+<script src="/static/checklist.js"></script>
+</body>
+</html>

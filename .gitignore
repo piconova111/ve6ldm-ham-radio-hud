@@ -1,0 +1,14 @@
+# Each station's own settings, log and data never go in the repository.
+config.ini
+data/
+*.sqlite3
+*.sqlite3-*
+station-backups/
+ham-bookmarks.html
+# Written by the installer on the station computer.
+app/VERSION
+# Python and download leftovers.
+__pycache__/
+*.pyc
+*.part
+*.log

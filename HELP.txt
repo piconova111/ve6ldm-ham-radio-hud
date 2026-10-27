@@ -1,0 +1,121 @@
+Station app: handy commands
+===========================
+
+Setup helper ........... ~/station/app/bin/setup.sh   (callsign, location, radio, callbook, auto login)
+Change settings ........ xed ~/station/config.ini      (or nano)
+Health report .......... ~/station/app/bin/status.sh
+Restart after changes .. systemctl --user restart station-app station-rigctld station-rigctld2
+Is it running? ......... systemctl --user status station-app
+Recent app messages .... journalctl --user -u station-app -n 50
+Radio link messages .... journalctl --user -u station-rigctld -n 50   (the second radio's: station-rigctld2)
+Reopen the display ..... Menu > Station display   (it also reopens by itself a few seconds after
+                         it's closed, and restarts itself if its page stops answering for 5 minutes)
+Close the display ...... Menu > Close station display   (or: systemctl --user stop station-display)
+                         It opens again from Menu > Station display, or when the computer restarts.
+                         Alt+F4 closes it too, but it reopens in a few seconds. To make Alt+F4 keep it
+                         closed, add "keep_open = no" under [display] in config.ini.
+Display messages ....... journalctl --user -u station-display -n 30
+Back up right now ...... python3 ~/station/app/bin/backup.py
+Backups ................ ~/station-backups  (logbook copy + ADIF, last 60 nights)
+The logbook itself ..... ~/station/data/logbook.sqlite3
+Automatic login ........ ~/station/app/bin/autologin.sh on    (or off)
+Update the app ......... run install.sh from the new download; settings and the log are kept
+Go back one version .... the previous version is kept in ~/station/app.old
+Favourites ............. the Favourites button on the display opens them in the computer's
+                         default web browser (Chromium or Firefox).
+                         To change the list: python3 ~/station/app/station/favourites.py > ~/station/favourites.json
+                         then edit that file and restart the app.
+Browser bookmarks ...... if ~/station/ham-bookmarks.html is there, it has the same links.
+                         Chromium: Bookmarks > Bookmark manager > the three dots > Import bookmarks
+                         Firefox: Bookmarks > Manage Bookmarks > Import and Backup > Import Bookmarks from HTML
+Map views .............. the buttons above the map: Flat map, Globe, Beam map. The display remembers
+                         the one picked. On the flat map, looking up a station turns it into the globe
+                         to show the path; closing the station card (the X, or Esc) brings it back.
+                         Drag the globe to turn it. On the beam map, point anywhere to read the heading.
+  no globe on look-up .. add "globe_on_lookup = no" under [display] in config.ini, then restart the app
+CQ zones ............... the red numbers. Click one (or "CQ zones" on the map) for the zone's name,
+                         its countries and prefixes, and which zones are in the log (for WAZ).
+  hide them ............ "show_zones = no" under [display] in config.ini, then restart the app
+Stats .................. the Stats button (or "See your stats" under My log): contacts, countries,
+                         CQ zones, continents and bands, contacts per month, the furthest contact,
+                         the latest new ones, and every DXCC country with what's in the log.
+                         Point at a bar for its exact numbers.
+New ones ............... badges in the spot list: NEW = a country not in the log yet, ZONE = a new
+                         CQ zone, BAND = a country in the log but not on that band yet. New countries
+                         also get an amber ring on the maps.
+DX cluster ............. spots come from [cluster] host in config.ini. If that node stops answering or
+                         sending spots, the app moves to the next one under "backups" by itself, and tries
+                         the first one again every hour. "station status" shows which one is in use.
+Welcome banner ......... plays the first time the display opens after the computer starts. Click
+                         the callsign at the top left to see it again; click anywhere to skip it.
+  settings ............. under [display] in config.ini: "welcome = no" switches it off, and
+                         welcome_text is the line under the callsign
+Tester checklist ....... the link under the greeting opens the checklist in a browser window: where to
+                         find each part of the display, how to try it, Found it / Tried it, Like it /
+                         Needs a change, and notes. Answers are kept in ~/station/data/checklist.json.
+  read the answers ..... python3 ~/station/app/bin/feedback.py   (remotely: station feedback)
+  who reads them ....... "helper = ..." under [personal] in config.ini names them on the checklist
+  hide the link ........ "checklist = no" under [display] in config.ini
+Two radios ............. the radio box shows the radio in use: the one transmitting, or else the one tuned
+                         (or switched on) last. With both on, the radio's name has arrows: click it to show
+                         the other one. "Tune to" tunes the radio showing, or the other one if only that one
+                         has an antenna for the band. The log notes which radio each contact was made on.
+Connect a radio ........ ~/station/app/bin/radio.sh   (the setup helper runs it). It finds the radio's
+                         Hamlib model, its cable and the speed it answers at, and saves them under [radio]
+                         in config.ini. With --check it only tests the cable and changes nothing.
+Second radio ........... put its name under [radio2] in config.ini, then run ~/station/app/bin/radio2.sh
+                         (remotely: station radio2). It saves what it finds under [radio2].
+Bands .................. the spot list's band buttons, band openings and Listen to yourself show only the
+                         bands the antennas cover: "bands = ..." under [radio] and [radio2] in config.ini.
+While transmitting ..... the radio box shows the power going out and the SWR. SWR turns amber from 1.5
+                         and red from 2.5, and a warning pops up if it stays at 3 or more.
+"Not answering" ........ the radio is probably switched off; the link reconnects when it's back on.
+"Cable unplugged" ...... the radio's USB cable isn't plugged into the computer.
+Alerts ................. a banner on the map for Environment Canada weather alerts near the station and
+                         for NOAA space weather (solar flares, radiation and geomagnetic storms).
+                         "Full warning" opens the alert in the web browser; the X hides it until it
+                         changes. Thunderstorm alerts carry a reminder to disconnect the antennas.
+                         The chip on Band conditions shows space weather at a glance (click for NOAA).
+  settings ............. [alerts] in config.ini: weather_region (Canada only, for example abrm40 = Red Deer
+                         Co. near Pine Lake; blank turns weather alerts off) and space_weather (yes or no)
+Satellite passes ....... the tile at the bottom: the next passes of the ISS and the FM satellites (SO-50, AO-123,
+                         AO-91, PO-101). Click one for where to point, its frequencies (with the Doppler steps on
+                         70 cm), its notes, and AMSAT's latest reports. The sky chart is the pass: the edge is the
+                         horizon, the middle is straight up, north at the top. The satellite shows on the map too.
+  which ones ........... "fm = ..." under [satellites] in config.ini
+Who can hear you ....... the tile at the bottom. "Where stations near you are being heard" comes from PSK Reporter:
+                         FT8 and other digital signals sent from about 200 km around you, and who decoded them, in
+                         the last 15 minutes. Click a band to see those stations on the map as green dots (on the
+                         beam map, lines out from the middle show which way the band is open). Esc or the X hides
+                         them. Once you run FT8 yourself, it also says how many stations decoded you.
+                         DX cluster spots of your callsign are listed there too, with their paths on the map.
+  switch it off ........ "enabled = no" under [openings] in config.ini (it uses 50 to 100 MB a day when busy)
+Listen to yourself ..... the button on that tile: public KiwiSDR receivers a good distance away for the radio's
+                         band (the ones in your beam first, if a station is looked up). "Listen" opens one in the
+                         web browser, tuned to the radio's frequency. Say your call and hear yourself a second later.
+Waterfall .............. with an RTL-SDR on the radio's IF and "start = yes" under [waterfall] in config.ini,
+                         Gqrx opens by itself on the computer's own screen and reopens if it's closed.
+                         Its scale follows the radio's frequency (if_hz is the radio's IF).
+  turn it off .......... systemctl --user disable --now station-waterfall   (back on: enable --now)
+  restart it ........... systemctl --user restart station-waterfall
+  its messages ......... journalctl --user -u station-waterfall -n 30
+  its settings ......... ~/.config/gqrx/station.conf (gain and display changes made in Gqrx are kept)
+
+Data sources: AD1C country file (country-files.com); DX spots from public DX cluster nodes;
+band conditions from N0NBH (hamqsl.com); ISS orbits from CelesTrak; Canadian hams'
+towns from ISED's call sign list (Open Government Licence - Canada) and GeoNames
+postal codes (CC BY 4.0); coastlines for the globe and beam map from Natural Earth
+(public domain); CQ zone list checked against EI8IC's (mapability.com); weather alerts
+from Environment and Climate Change Canada (weather.gc.ca); space weather from NOAA's
+Space Weather Prediction Center (spaceweather.gov); band openings from PSK Reporter
+(pskreporter.info, live feed at mqtt.pskreporter.info by M0LTE); satellite orbits from
+CelesTrak and satellite reports from AMSAT (amsat.org); public KiwiSDR receivers from
+rx.linkfanel.net and kiwisdr.com.
+
+From another computer (a Raspberry Pi, say), the "station" command in the app's remote folder
+does most of this over SSH:
+station status, station screen, station update FILE, station settings,
+station restart, station radio2, station feedback, station logs, station backups,
+station ssh, station host.
+"station screen" shows the station display; "station screen laptop" shows the
+computer's own screen (where the waterfall is); "station screen both" shows both.

@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# station: look after a station computer running the station app from another Linux computer
+# (a Raspberry Pi, say), over SSH. Tailscale makes that work from anywhere.
+# Install once with:  sudo install -m 755 station /usr/local/bin/station
+# The first time, it asks which computer to look after (user@name, for example ham@station)
+# and remembers it in ~/.config/station/host. STATION_HOST=user@name overrides that.
+set -euo pipefail
+
+HOST_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/station/host"
+
+usage() {
+  cat <<'EOF'
+station status            Health report: app, radio link, spots, backups, version
+station screen            See the big screen (the station display) live
+station screen laptop     See the computer's own screen (the waterfall)
+station screen both       See both screens, shrunk to fit
+station update FILE       Install a new version, for example:
+                            station update ~/Downloads/station-app-0.3.0.tar.gz
+station settings          Edit the station settings, then restart the app
+station restart           Restart the app and the radio links
+station radio2            Connect the second radio (finds its cable and speed, then shows it)
+station radio2 --check    Only test the second radio's cable; nothing is changed
+station feedback          Show the answers and notes from the tester checklist
+station logs              Show the app's recent messages
+station backups           Copy the logbook backups to this computer
+station ssh               Open a terminal on the station computer
+station host              Show or change which station computer this looks after
+EOF
+}
+
+ask_host() {
+  local host=""
+  read -r -p "Which station computer? Type user@name (for example ham@station): " host
+  host="${host// /}"
+  if [[ "$host" != ?*@?* ]]; then
+    echo "That needs to be user@name, the way you'd type it after ssh."
+    exit 1
+  fi
+  mkdir -p "$(dirname "$HOST_FILE")"
+  printf '%s\n' "$host" > "$HOST_FILE"
+  echo "Saved. This computer now looks after $host."
+}
+
+case "${1:-help}" in help|-h|--help) usage; exit 0 ;; esac
+if [ "${1:-}" = host ]; then
+  [ -s "$HOST_FILE" ] && echo "Looking after: $(cat "$HOST_FILE")"
+  ask_host
+  exit 0
+fi
+if [ -z "${STATION_HOST:-}" ] && [ ! -s "$HOST_FILE" ]; then
+  [ -t 0 ] || { echo "Run \"station host\" once to say which station computer to look after."; exit 1; }
+  ask_host
+fi
+HOST="${STATION_HOST:-$(head -n 1 "$HOST_FILE")}"
+
+case "${1:-help}" in
+  status)
+    ssh "$HOST" '~/station/app/bin/status.sh'
+    ;;
+  screen)
+    which="${2:-big}"
+    case "$which" in big|laptop|both) ;; *) usage; exit 1 ;; esac
+    viewer="$(command -v xtigervncviewer || command -v vncviewer || true)"
+    if [ -z "$viewer" ]; then
+      echo "First install the viewer:  sudo apt install -y tigervnc-viewer"
+      exit 1
+    fi
+    echo "Connecting to the $which screen. Close the viewer window when you're done."
+    ssh -f -o ExitOnForwardFailure=yes -L 5901:127.0.0.1:5900 "$HOST" "~/station/app/bin/share-screen.sh $which"
+    sleep 2
+    "$viewer" localhost::5901 >/dev/null 2>&1
+    ;;
+  update)
+    file="${2:-}"
+    if [ ! -f "$file" ]; then
+      echo "Tell me which file, for example:  station update ~/Downloads/station-app-0.3.0.tar.gz"
+      exit 1
+    fi
+    echo "Sending $(basename "$file") to the station..."
+    scp -q "$file" "$HOST:/tmp/station-update.tar.gz"
+    ssh -t "$HOST" 'rm -rf /tmp/station-update && mkdir -p /tmp/station-update \
+      && tar xf /tmp/station-update.tar.gz -C /tmp/station-update \
+      && bash /tmp/station-update/station-app/install.sh'
+    echo "The station display refreshes by itself within a minute."
+    # This command comes in the same package; say so if the package has a newer one.
+    if tar -xzf "$file" -O station-app/remote/station 2>/dev/null | cmp -s - "$0"; then
+      :
+    elif tar -tzf "$file" station-app/remote/station >/dev/null 2>&1; then
+      echo
+      echo "This version also has a newer station command for this computer. To update it, run:"
+      echo "  tar -xzf $file -C /tmp station-app/remote/station && sudo install -m 755 /tmp/station-app/remote/station /usr/local/bin/station"
+    fi
+    ;;
+  settings)
+    ssh -t "$HOST" 'nano ~/station/config.ini && systemctl --user restart station-app station-rigctld station-rigctld2 \
+      && echo "Saved and restarted. The station display refreshes by itself within a minute."'
+    ;;
+  restart)
+    ssh "$HOST" 'systemctl --user restart station-app station-rigctld station-rigctld2 && echo "Restarted."'
+    ;;
+  radio2)
+    case "${2:-}" in
+      "") ssh -t "$HOST" '~/station/app/bin/radio2.sh' ;;
+      --check) ssh -t "$HOST" '~/station/app/bin/radio2.sh --check' ;;
+      *) usage; exit 1 ;;
+    esac
+    ;;
+  feedback)
+    ssh "$HOST" 'python3 ~/station/app/bin/feedback.py'
+    ;;
+  logs)
+    ssh "$HOST" 'journalctl --user -u station-app -n 60 --no-pager'
+    ;;
+  backups)
+    # The folder is named after the station's callsign, for example ~/VE6LDM-backups.
+    call="$(ssh "$HOST" "sed -n 's|^[[:space:]]*callsign[[:space:]]*=[[:space:]]*\([A-Za-z0-9/]*\).*|\1|p' ~/station/config.ini | head -n 1" | tr '[:lower:]/' '[:upper:]-')"
+    dest="$HOME/${call:-station}-backups"
+    mkdir -p "$dest"
+    rsync -a "$HOST:station-backups/" "$dest/"
+    echo "Copied. The backups are in $dest"
+    ;;
+  ssh)
+    ssh -t "$HOST"
+    ;;
+  *)
+    usage
+    ;;
+esac

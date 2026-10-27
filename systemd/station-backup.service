@@ -1,0 +1,6 @@
+[Unit]
+Description=Back up the station logbook
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/station/app/bin/backup.py

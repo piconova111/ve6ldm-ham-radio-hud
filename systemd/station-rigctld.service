@@ -1,0 +1,10 @@
+[Unit]
+Description=Radio link (Hamlib rigctld)
+
+[Service]
+ExecStart=%h/station/app/bin/rigctld.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

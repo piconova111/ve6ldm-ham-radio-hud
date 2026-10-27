@@ -1,0 +1,14 @@
+[Unit]
+Description=Waterfall (Gqrx on the computer's own screen)
+After=station-app.service
+
+[Service]
+ExecStart=%h/station/app/bin/waterfall.sh
+Environment=DISPLAY=:0
+Restart=always
+RestartSec=5
+# Exit status 3 means the waterfall is switched off in config.ini, so don't keep restarting it.
+RestartPreventExitStatus=3
+
+[Install]
+WantedBy=default.target

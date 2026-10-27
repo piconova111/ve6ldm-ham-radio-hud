@@ -1,0 +1,16 @@
+[Unit]
+Description=Station display (full screen on the big monitor)
+After=station-app.service
+
+[Service]
+ExecStart=%h/station/app/bin/kiosk.sh
+Environment=DISPLAY=:0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+Restart=always
+RestartSec=5
+# Exit status 3 means it was closed with "keep_open = no" in config.ini (or Chromium is missing),
+# so don't open it again until it's asked for.
+RestartPreventExitStatus=3
+
+[Install]
+WantedBy=default.target
