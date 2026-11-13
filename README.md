@@ -8,7 +8,7 @@ conditions, satellite passes, alerts and your logbook.
 It was built for **VE6LDM**, Lee's station in central Alberta, Canada, as a gift from his son
 Travis. The code was written by Claude, Anthropic's AI model, working with Travis.
 
-![The station display: live spots on the map, a station looked up with the path and beam heading](docs/screenshots/hud.png)
+![The station display: live spots on the map, a station looked up with the path and beam heading, and the stations WSJT-X heard on FT8 as small violet dots](docs/screenshots/hud.png)
 
 > **Work VE6LDM!** Lee operates SSB on the HF bands (80 to 10 metres) from grid square DO32,
 > near Red Deer, Alberta. If you hear him, give him a call. He'd be glad of the contact.
@@ -93,6 +93,9 @@ Travis. The code was written by Claude, Anthropic's AI model, working with Travi
 
 <table>
 <tr>
+<td colspan="2"><img src="docs/screenshots/waterfall.png" alt="The waterfall: the band around the radio's frequency, with DX spots' callsigns on their signals"><br>The waterfall on the computer's own screen: the band around the radio's dial, with DX spots' callsigns on their signals</td>
+</tr>
+<tr>
 <td width="50%"><img src="docs/screenshots/globe.png" alt="Globe view showing the path to a station"><br>The globe swings round to show the path</td>
 <td width="50%"><img src="docs/screenshots/beam.png" alt="Beam map centred on the station"><br>The beam map: the angle from the middle is the beam heading</td>
 </tr>
@@ -106,7 +109,9 @@ Travis. The code was written by Claude, Anthropic's AI model, working with Travi
 </tr>
 </table>
 
-The screenshots are from a test run with sample spots and a sample log.
+The screenshots are from a test run with sample data: spots, a log, band conditions, AMSAT's reports, and what
+PSK Reporter and WSJT-X heard. The satellite passes are real ones for the middle of grid square DO32, worked out
+from that day's orbits.
 
 ## What you need
 
