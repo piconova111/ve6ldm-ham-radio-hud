@@ -35,6 +35,7 @@
         <span class="meter-label" id="meter-label"></span>
       </div>
       <span class="radio-tx" id="radio-tx" hidden><span class="tx-power" id="tx-power"></span><span class="tx-swr" id="tx-swr"></span></span>
+      <button type="button" class="radio-split" id="radio-split" hidden></button>
       <span class="on-air" id="on-air" hidden>ON AIR</span>
     </div>
     <div class="radio-hint" id="radio-hint" hidden></div>
@@ -59,6 +60,7 @@
       <span><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4.5" fill="#67D1FF"></circle></svg><span id="legend-spots">Spotted on 20 m</span></span>
       <span id="legend-new" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.6" fill="none" stroke="#FFB24A" stroke-width="1.8"></circle><circle cx="8" cy="8" r="3.4" fill="#67D1FF"></circle></svg>New country</span>
       <span><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="#FFB24A" stroke-width="2"></circle></svg>Heard you</span>
+      <span id="legend-ft8" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.6" fill="#A78BFA" stroke="#06121F" stroke-width="1.2"></circle></svg><span id="legend-ft8-text">Heard on FT8</span></span>
       <span><svg class="wide" viewBox="0 0 24 16" aria-hidden="true"><path d="M2 12 Q12 2 22 8" fill="none" stroke="#67D1FF" stroke-width="2.5" stroke-linecap="round"></path></svg><span id="legend-path">Path to a station</span></span>
       <span><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="#E6EDF6" stroke-width="1.5" stroke-dasharray="3 2"></circle><circle cx="8" cy="8" r="2" fill="#E6EDF6"></circle></svg>ISS</span>
       <span id="legend-night"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="3" fill="#050A12" stroke="#2B4061" stroke-width="1.5"></rect></svg>Night side</span>
@@ -105,7 +107,7 @@
       <button type="button" class="zones-pill" id="zones-pill" hidden><span class="zone-chip">14</span><span>CQ zones<span class="zp-more">: what the red numbers mean</span></span></button>
       <div class="view view-flat">
       <canvas id="flat-canvas" class="map-canvas"></canvas>
-      <svg class="overlay" viewBox="0 0 1180 601" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <svg class="overlay" id="flat-overlay" viewBox="0 0 1180 601" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
         <defs>
           <radialGradient id="qth-halo"><stop offset="0" stop-color="#FFB24A" stop-opacity="0.35"></stop><stop offset="1" stop-color="#FFB24A" stop-opacity="0"></stop></radialGradient>
         </defs>
@@ -128,6 +130,7 @@
           <text x="688" y="364">37</text><text x="636" y="464">38</text><text x="754" y="446">39</text>
           <text x="459" y="71">40</text>
         </g>
+        <path id="ft8-marks" fill="#A78BFA" stroke="#06121F" stroke-width="1.4"></path>
         <path id="heard-paths" fill="none" stroke="#FFB24A" stroke-opacity="0.6" stroke-width="1.5" stroke-linecap="round"></path>
         <path id="heard-marks" fill="none" stroke="#FFB24A" stroke-width="2"></path>
         <path id="spot-glow" fill="#67D1FF" fill-opacity="0.16"></path>
@@ -212,9 +215,20 @@
           <div><div class="m-label">Distance</div><div class="m-value" id="c-dist"></div><div class="m-sub" id="c-miles"></div></div>
           <div><div class="m-label">Their time</div><div class="m-value" id="c-time"></div><div class="m-sub" id="c-day"></div></div>
         </div>
-        <p class="card-history" id="c-history"></p>
+        <div class="card-history-row">
+          <p class="card-history" id="c-history"></p>
+          <button type="button" class="link-btn" id="c-history-btn" hidden>History and notes</button>
+        </div>
         <p class="card-zone" id="c-zone" hidden></p>
         <p class="card-note" id="c-note" hidden></p>
+        <div class="card-split" id="c-split" hidden>
+          <p class="split-text" id="c-split-text"></p>
+          <div class="split-btns" id="c-split-btns" hidden>
+            <button type="button" class="split-btn" id="split-down" title="Transmit 1 kHz lower">&minus;1 kHz</button>
+            <button type="button" class="split-btn" id="split-up" title="Transmit 1 kHz higher">+1 kHz</button>
+            <button type="button" class="split-btn" id="split-off" title="Transmit where the radio listens again">Split off</button>
+          </div>
+        </div>
         <div class="actions">
           <button type="button" class="btn-tune" id="btn-tune" hidden>Tune</button>
           <label class="sr-only" for="log-band">Band for this contact</label>
@@ -384,6 +398,7 @@
       <h2 id="stats-title">Your log in numbers</h2>
       <div class="tabs stats-tabs" role="tablist" aria-label="Stats">
         <button type="button" role="tab" id="st-tab-overview" data-tab="overview" aria-selected="true" aria-controls="st-overview">Overview</button>
+        <button type="button" role="tab" id="st-tab-stations" data-tab="stations" aria-selected="false" aria-controls="st-stations">Stations</button>
         <button type="button" role="tab" id="st-tab-countries" data-tab="countries" aria-selected="false" aria-controls="st-countries">Countries</button>
         <button type="button" role="tab" id="st-tab-zones" data-tab="zones" aria-selected="false" aria-controls="st-zones">CQ zones</button>
       </div>
@@ -397,9 +412,30 @@
         <section class="st-card"><h3>Countries by continent</h3><div class="meters" id="st-continents"></div></section>
         <section class="st-card"><h3>Contacts per month</h3><div class="cols" id="st-months"></div></section>
         <section class="st-card"><h3>Latest new ones</h3><ol class="new-ones" id="st-new"></ol></section>
+        <section class="st-card"><h3>Stations you talk to most</h3><ol class="regulars" id="st-regulars"></ol></section>
+        <section class="st-card"><h3 id="st-onday-title">On this day</h3><ol class="onday" id="st-onday"></ol></section>
       </div>
       <p class="st-note">Awards need confirmed contacts (a QSL card or Logbook of the World): DXCC needs 100 countries,
         WAZ all 40 CQ zones, and WAC (Worked All Continents) all six continents.</p>
+    </section>
+
+    <section class="st-panel" id="st-stations" role="tabpanel" aria-labelledby="st-tab-stations" hidden>
+      <div class="sn-bar">
+        <div class="zones-count" id="sn-count"></div>
+        <label class="sr-only" for="sn-search">Find a station</label>
+        <input id="sn-search" class="sn-search" type="search" placeholder="Find a call, name or country" autocomplete="off" spellcheck="false">
+        <div class="ct-filter sn-sort" role="group" aria-label="Order">
+          <button type="button" data-sort="last" aria-pressed="true">Latest</button>
+          <button type="button" data-sort="first" aria-pressed="false">First met</button>
+          <button type="button" data-sort="count" aria-pressed="false">Most contacts</button>
+          <button type="button" data-sort="far" aria-pressed="false">Farthest</button>
+          <button type="button" data-sort="call" aria-pressed="false">A to Z</button>
+        </div>
+      </div>
+      <div class="zones-main">
+        <ol class="sn-list" id="sn-list"><li class="soon">Loading your stations&hellip;</li></ol>
+        <section class="zone-detail sn-detail" id="sn-detail" aria-live="polite"></section>
+      </div>
     </section>
 
     <section class="st-panel" id="st-countries" role="tabpanel" aria-labelledby="st-tab-countries" hidden>
@@ -442,6 +478,7 @@
 
 <div class="toast" id="toast" role="status" hidden>
   <span id="toast-text"></span>
+  <button type="button" id="toast-note" hidden>Add a note</button>
   <button type="button" id="toast-undo" hidden>Undo</button>
 </div>
 

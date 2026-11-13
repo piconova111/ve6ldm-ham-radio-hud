@@ -1,0 +1,156 @@
+/* The waterfall page, on the computer's own screen: the station display's colours and fonts. */
+@font-face { font-family: 'B612'; src: url('/static/fonts/B612-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'B612'; src: url('/static/fonts/B612-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'B612 Mono'; src: url('/static/fonts/B612Mono-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'B612 Mono'; src: url('/static/fonts/B612Mono-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
+
+:root {
+  --ground: #0D1624;
+  --panel: #121F33;
+  --deep: #0A1322;
+  --line: #23344D;
+  --line-strong: #2B4061;
+  --text: #E6EDF6;
+  --soft: #C6D3E3;
+  --muted: #9DB0C8;
+  --dim: #7F93AD;
+  --vfd: #67D1FF;
+  --amber: #FFB24A;
+  --red: #E5484D;
+  --listen: #4ADE80;
+  --sans: 'B612', 'DejaVu Sans', sans-serif;
+  --mono: 'B612 Mono', 'DejaVu Sans Mono', monospace;
+}
+
+html, body { margin: 0; height: 100%; background: var(--ground); color: var(--text); }
+body { font-family: var(--sans); overflow: hidden; }
+[hidden] { display: none !important; }
+button { font: inherit; cursor: pointer; }
+button:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+
+.wf { display: flex; flex-direction: column; height: 100vh; }
+
+.wf-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 1.5rem;
+  padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.wf-radio { display: flex; align-items: baseline; gap: 0.875rem; min-width: 0; }
+.wf-name { font-size: 1.0625rem; font-weight: 700; color: var(--soft); }
+.wf-freq { font-family: var(--mono); font-size: 2rem; line-height: 1; color: var(--vfd); }
+.wf-mode { font-family: var(--mono); font-size: 1.125rem; color: var(--vfd); }
+.wf-onair {
+  align-self: center; padding: 0.125rem 0.5rem; border-radius: 0.375rem; border: 1px solid var(--line-strong);
+  font-size: 0.875rem; font-weight: 700; letter-spacing: 0.12em; color: var(--dim);
+}
+.wf-onair.lit { background: var(--red); border-color: #FF7A7E; color: #FFFFFF; box-shadow: 0 0 0.875rem rgba(229, 72, 77, 0.75); }
+.wf-split {
+  align-self: center; padding: 0.125rem 0.5rem; border-radius: 0.375rem; border: 1px solid var(--amber);
+  background: rgba(255, 178, 74, 0.12); color: var(--amber); font-family: var(--mono); font-size: 0.9375rem;
+}
+.wf-split b { margin-right: 0.375rem; }
+/* Someone listening from another computer: a quiet green sign on the station's own screen */
+.wf-ears {
+  align-self: center; display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.125rem 0.5rem;
+  border-radius: 0.375rem; border: 1px solid rgba(74, 222, 128, 0.6); background: rgba(74, 222, 128, 0.1);
+  color: var(--listen); font-size: 0.875rem; font-weight: 700;
+}
+.wf-ears svg, .ls-play svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2; }
+.wf-ears svg rect, .ls-play svg rect { fill: currentColor; stroke: none; }
+
+/* The listening bar (the page opened as /listen, from another computer) */
+.wf-listen {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem 1rem;
+  padding: 0.5rem 1.25rem; border-bottom: 1px solid var(--line); background: var(--deep);
+}
+.ls-play {
+  display: inline-flex; align-items: center; gap: 0.5rem; height: 2.375rem; padding: 0 1rem; border-radius: 0.5rem;
+  border: 1px solid var(--listen); background: rgba(74, 222, 128, 0.12); color: var(--listen); font-size: 1rem; font-weight: 700;
+}
+.ls-play svg { width: 1.125rem; height: 1.125rem; }
+.ls-play[aria-pressed="true"] { background: var(--listen); color: #062012; }
+.ls-group { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 0.5rem; overflow: hidden; }
+.ls-group button {
+  height: 2.125rem; padding: 0 0.75rem; border: 0; border-left: 1px solid var(--line-strong);
+  background: var(--panel); color: var(--soft); font-size: 0.9375rem; font-weight: 700;
+}
+.ls-group button:first-child { border-left: 0; }
+.ls-group button[aria-pressed="true"] { background: rgba(74, 222, 128, 0.16); color: var(--listen); }
+.ls-group button:disabled { color: var(--dim); cursor: default; }
+.ls-group button:disabled[aria-pressed="true"] { color: var(--soft); background: rgba(157, 176, 200, 0.14); }
+.ls-label { font-size: 0.8125rem; color: var(--muted); margin-right: 0.375rem; }
+.ls-fine { display: inline-flex; align-items: center; gap: 0.25rem; }
+.ls-fine button {
+  width: 2rem; height: 2rem; border-radius: 0.375rem; border: 1px solid var(--line-strong);
+  background: var(--panel); color: var(--soft); font-size: 1.125rem; font-weight: 700; line-height: 1;
+}
+.ls-fine output { min-width: 4.5rem; text-align: center; font-family: var(--mono); color: var(--text); cursor: pointer; }
+.ls-vol { display: inline-flex; align-items: center; }
+.ls-vol input { width: 8rem; accent-color: var(--listen); }
+.ls-level { display: inline-flex; align-items: center; }
+.ls-meter { display: inline-block; width: 4.5rem; height: 0.5rem; border-radius: 0.25rem; background: var(--panel); border: 1px solid var(--line); overflow: hidden; }
+.ls-meter span { display: block; height: 100%; width: 0; background: var(--listen); transition: width 0.1s linear; }
+.ls-status { flex: 1 1 18rem; min-width: 0; font-size: 0.9375rem; color: var(--soft); }
+.ls-status b { color: var(--listen); font-family: var(--mono); }
+.ls-status.trouble { color: var(--amber); }
+input:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+.wf-tools { display: flex; align-items: center; gap: 1rem; flex: none; }
+/* FT8: opens WSJT-X, or brings it to the front; a green light while it's open */
+.wf-ft8 {
+  display: inline-flex; align-items: center; gap: 0.4375rem;
+  height: 2.25rem; padding: 0 0.875rem; border-radius: 0.5rem; border: 1px solid var(--line-strong);
+  background: var(--deep); color: var(--soft); font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.04em;
+}
+.wf-ft8:hover { border-color: var(--vfd); color: var(--text); }
+.wf-ft8.open::before {
+  content: ""; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--listen);
+  box-shadow: 0 0 0.375rem rgba(74, 222, 128, 0.8);
+}
+.wf-ft8:disabled { opacity: 0.6; cursor: progress; }
+.wf-zoom { display: flex; gap: 0.375rem; flex: none; }
+.wf-zoom button {
+  height: 2.25rem; padding: 0 0.75rem; border-radius: 0.5rem; border: 1px solid var(--line-strong);
+  background: var(--deep); color: var(--soft); font-size: 0.9375rem; font-weight: 700;
+}
+.wf-zoom button:hover { border-color: var(--vfd); }
+.wf-zoom button[aria-pressed="true"] { border-color: var(--vfd); background: rgba(103, 209, 255, 0.16); color: var(--vfd); }
+
+.wf-main { position: relative; flex: 1; min-height: 0; background: var(--deep); }
+.wf-main canvas { position: absolute; left: 0; display: block; }
+.wf-over { top: 0; cursor: crosshair; }
+.wf-over.on-label { cursor: pointer; }
+
+.wf-tip {
+  position: absolute; z-index: 3; max-width: 24rem; padding: 0.5rem 0.75rem; border-radius: 0.5rem;
+  background: rgba(10, 19, 34, 0.96); border: 1px solid var(--line-strong); box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.5);
+  font-size: 0.9375rem; line-height: 1.4; color: var(--text); pointer-events: none;
+}
+.wf-tip .tip-call { font-family: var(--mono); font-weight: 700; color: var(--vfd); }
+.wf-tip .tip-freq { font-family: var(--mono); font-weight: 700; color: var(--vfd); }
+.wf-tip .tip-split { color: var(--amber); }
+.wf-tip .tip-hint { color: var(--dim); }
+
+.wf-msg {
+  position: absolute; z-index: 2; left: 50%; top: 40%; transform: translate(-50%, -50%); max-width: 40rem;
+  padding: 1rem 1.5rem; border-radius: 0.75rem; background: rgba(18, 31, 51, 0.95); border: 1px solid var(--line-strong);
+  font-size: 1.125rem; line-height: 1.45; text-align: center; color: var(--soft);
+}
+
+.wf-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 1.5rem;
+  padding: 0.5rem 1.25rem; border-top: 1px solid var(--line); background: var(--panel);
+  font-size: 0.875rem; color: var(--muted);
+}
+.wf-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-key { display: flex; align-items: center; gap: 0.5rem; flex: none; white-space: nowrap; }
+.wf-key .key { display: inline-block; width: 0.875rem; height: 0.875rem; margin-left: 0.875rem; border-radius: 2px; }
+.wf-key .key:first-child { margin-left: 0; }
+.key-rx { background: linear-gradient(90deg, transparent 45%, var(--vfd) 45%, var(--vfd) 60%, transparent 60%), rgba(103, 209, 255, 0.22); }
+.key-tx { background: var(--red); }
+.key-split { background: repeating-linear-gradient(180deg, var(--amber) 0 3px, transparent 3px 6px); width: 0.25rem !important; }
+.key-listen { background: linear-gradient(90deg, transparent 45%, var(--listen) 45%, var(--listen) 60%, transparent 60%), rgba(74, 222, 128, 0.22); }
+
+.wf-toast {
+  position: fixed; z-index: 4; left: 50%; bottom: 3.5rem; transform: translateX(-50%); max-width: 46rem;
+  padding: 0.625rem 1rem; border-radius: 0.625rem; background: rgba(18, 31, 51, 0.97); border: 1px solid var(--line-strong);
+  font-size: 1rem; color: var(--text); box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.5);
+}

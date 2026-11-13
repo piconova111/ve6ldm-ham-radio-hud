@@ -11,13 +11,14 @@
 const Maps = (() => {
   const RAD = Math.PI / 180, TAU = 2 * Math.PI;
   const VFD = [103, 209, 255], AMBER = [255, 178, 74], WHITE = [230, 237, 246], GREEN = [74, 222, 128];
+  const VIOLET = [167, 139, 250];   // stations WSJT-X hears here (FT8)
   const NIGHT_TINT = [6, 12, 24];
   const MONO = '"B612 Mono", "DejaVu Sans Mono", monospace';
   const BEAM_WIDTH = 60;   // degrees; about the width of a hex beam's main lobe
   const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const st = {
-    ready: false, view: 'flat', home: null, homeV: null, target: null, spots: [], heard: [],
+    ready: false, view: 'flat', home: null, homeV: null, target: null, spots: [], heard: [], ft8: [],
     iss: null, issOpen: false, sun: [1, 0, 0], sunLL: [0, 0], hint: null, zones: [], zonesShown: false,
     sat: null, openings: [],   // the satellite whose card is open; where the band is open from here
   };
@@ -249,6 +250,27 @@ const Maps = (() => {
     for (const h of zoneHits) {
       const d = (h.x - x) ** 2 + (h.y - y) ** 2;
       if (d < bd) { bd = d; best = h.zone; }
+    }
+    return best;
+  }
+  // The dots drawn in the last frame, for pointing and clicking: the green ones (stations hearing the area)
+  // as {x, y, p}, p the receiver as /api/openings sends it, the spots as {x, y, s}, s as /api/spots sends it,
+  // and the stations WSJT-X hears as {x, y, f}, f as /api/ft8/heard sends it.
+  let openHits = [], spotHits = [], ft8Hits = [];
+  let dotClick = null, dotHover = null;
+  function dotAt(x, y) {   // the nearest dot within 10 px: {open: p}, {spot: s} or {ft8: f}, or null
+    let best = null, bd = 10 * 10;
+    for (const h of openHits) {   // drawn on top of the spots, so they win a tie
+      const d = (h.x - x) ** 2 + (h.y - y) ** 2;
+      if (d < bd) { bd = d; best = { open: h.p }; }
+    }
+    for (const h of spotHits) {
+      const d = (h.x - x) ** 2 + (h.y - y) ** 2;
+      if (d < bd) { bd = d; best = { spot: h.s }; }
+    }
+    for (const h of ft8Hits) {   // drawn under the others, so they lose a tie
+      const d = (h.x - x) ** 2 + (h.y - y) ** 2;
+      if (d < bd) { bd = d; best = { ft8: h.f }; }
     }
     return best;
   }
@@ -618,6 +640,9 @@ const Maps = (() => {
   function drawGlobeMarks(ctx, C, now) {
     const vis = (v) => { const p = projV(C, v); return p[2] > 0.03 ? p : null; };
     zoneHits = [];
+    openHits = [];
+    spotHits = [];
+    ft8Hits = [];
     if (st.zonesShown) {
       const marks = [projV(C, st.homeV)];
       if (st.target) marks.push(projV(C, st.target.v));
@@ -627,12 +652,21 @@ const Maps = (() => {
       }
     }
     for (const h of st.heard) strokeRun(ctx, C, pathPoints(st.homeV, h.v, false), rgb(AMBER, 0.6), 1.5);
+    for (const f of st.ft8) {   // small, under the spots: there can be a hundred
+      const p = vis(f.v);
+      if (p) {
+        disc(ctx, p[0], p[1], 4.6, 'rgba(6,18,31,0.85)');
+        disc(ctx, p[0], p[1], 3.4, rgb(VIOLET));
+        ft8Hits.push({ x: p[0], y: p[1], f: f.f });
+      }
+    }
     for (const s of st.spots) {
       const p = vis(s.v);
       if (p) {
         glowDot(ctx, p[0], p[1], 10, VFD, 0.3);
         disc(ctx, p[0], p[1], 4, rgb(VFD));
         if (s.fresh) ring(ctx, p[0], p[1], 8, rgb(AMBER), 2);
+        spotHits.push({ x: p[0], y: p[1], s: s.s });
       }
     }
     for (const h of st.heard) {
@@ -641,7 +675,11 @@ const Maps = (() => {
     }
     for (const o of st.openings) {   // on top: these were asked for
       const p = vis(o.v);
-      if (p) { disc(ctx, p[0], p[1], 5, 'rgba(6,18,31,0.9)'); disc(ctx, p[0], p[1], 3.6, rgb(GREEN)); }
+      if (p) {
+        disc(ctx, p[0], p[1], 5, 'rgba(6,18,31,0.9)');
+        disc(ctx, p[0], p[1], 3.6, rgb(GREEN));
+        openHits.push({ x: p[0], y: p[1], p: o.p });
+      }
     }
     // The sun, where it's overhead.
     const sp = vis(st.sun);
@@ -727,6 +765,7 @@ const Maps = (() => {
   function setupDrag() {
     const c = layers.globe.canvas;
     c.addEventListener('pointerdown', (e) => {
+      if (dotHover) dotHover(null);
       globe.from = null;
       globe.press = { x: e.clientX, y: e.clientY };
       globe.drag = { x: e.clientX, y: e.clientY, t: performance.now() };
@@ -736,8 +775,10 @@ const Maps = (() => {
     });
     c.addEventListener('pointermove', (e) => {
       if (!globe.drag) {
-        const r = c.getBoundingClientRect();
-        c.style.cursor = zoneAt(e.clientX - r.left, e.clientY - r.top) ? 'pointer' : '';
+        const r = c.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+        const dot = dotAt(x, y);
+        c.style.cursor = dot || zoneAt(x, y) ? 'pointer' : '';
+        if (dotHover) dotHover(dot, e);
         return;
       }
       const dx = e.clientX - globe.drag.x, dy = e.clientY - globe.drag.y;
@@ -754,13 +795,16 @@ const Maps = (() => {
       c.classList.remove('dragging');
       if (e.type === 'pointerup' && globe.press && Math.hypot(e.clientX - globe.press.x, e.clientY - globe.press.y) < 5) {
         globe.vel = [0, 0];
-        const r = c.getBoundingClientRect(), zone = zoneAt(e.clientX - r.left, e.clientY - r.top);
-        if (zone && zoneClick) zoneClick(zone);
+        const r = c.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+        const dot = dotAt(x, y), zone = dot ? null : zoneAt(x, y);
+        if (dot && dotClick) dotClick(dot);
+        else if (zone && zoneClick) zoneClick(zone);
       }
       requestDraw();
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('pointercancel', end);
+    c.addEventListener('pointerleave', () => { if (dotHover && !globe.drag) dotHover(null); });
   }
 
   /* ---------- beam map ---------- */
@@ -906,6 +950,9 @@ const Maps = (() => {
     let busy = false;
     const T = st.target;
     zoneHits = [];
+    openHits = [];
+    spotHits = [];
+    ft8Hits = [];
     if (st.zonesShown) {
       const marks = [[G.cx, G.cy]];
       if (T) marks.push(beamProj(G, T.v));
@@ -1007,11 +1054,18 @@ const Maps = (() => {
       ctx.lineTo(x, y);
       ctx.stroke();
     }
+    for (const f of st.ft8) {   // small, under the spots
+      const [x, y] = beamProj(G, f.v);
+      disc(ctx, x, y, 4.4, 'rgba(6,18,31,0.85)');
+      disc(ctx, x, y, 3.2, rgb(VIOLET));
+      ft8Hits.push({ x, y, f: f.f });
+    }
     for (const s of st.spots) {
       const [x, y] = beamProj(G, s.v);
       glowDot(ctx, x, y, 9, VFD, 0.3);
       disc(ctx, x, y, 3.5, rgb(VFD));
       if (s.fresh) ring(ctx, x, y, 7.5, rgb(AMBER), 2);
+      spotHits.push({ x, y, s: s.s });
     }
     for (const h of st.heard) {
       const [x, y] = beamProj(G, h.v);
@@ -1021,6 +1075,7 @@ const Maps = (() => {
       const [x, y] = beamProj(G, o.v);
       disc(ctx, x, y, 5, 'rgba(6,18,31,0.9)');
       disc(ctx, x, y, 3.6, rgb(GREEN));
+      openHits.push({ x, y, p: o.p });
     }
     if (st.iss) {
       ctx.setLineDash([5, 4]);
@@ -1105,15 +1160,19 @@ const Maps = (() => {
   function setupHover() {
     const c = layers.beam.canvas;
     c.addEventListener('pointermove', (e) => {
-      const r = c.getBoundingClientRect();
-      beam.hover = { x: e.clientX - r.left, y: e.clientY - r.top };
-      c.style.cursor = zoneAt(beam.hover.x, beam.hover.y) ? 'pointer' : '';
+      const r = c.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      const dot = dotAt(x, y);
+      beam.hover = dot ? null : { x, y };   // over a dot, its own box gives the heading and distance
+      c.style.cursor = dot || zoneAt(x, y) ? 'pointer' : '';
+      if (dotHover) dotHover(dot, e);
       requestDraw();
     });
-    c.addEventListener('pointerleave', () => { beam.hover = null; requestDraw(); });
+    c.addEventListener('pointerleave', () => { beam.hover = null; if (dotHover) dotHover(null); requestDraw(); });
     c.addEventListener('click', (e) => {
-      const r = c.getBoundingClientRect(), zone = zoneAt(e.clientX - r.left, e.clientY - r.top);
-      if (zone && zoneClick) zoneClick(zone);
+      const r = c.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      const dot = dotAt(x, y), zone = dot ? null : zoneAt(x, y);
+      if (dot && dotClick) dotClick(dot);
+      else if (zone && zoneClick) zoneClick(zone);
     });
   }
 
@@ -1239,14 +1298,22 @@ const Maps = (() => {
   function setSpots(list) {
     // fresh: a country that isn't in the log yet, drawn with an amber ring
     st.spots = (list || []).filter((s) => s.lat !== null && s.lat !== undefined)
-      .map((s) => ({ call: s.call, v: vec(s.lat, s.lon), fresh: s.new === 'country' }));
+      .map((s) => ({ call: s.call, v: vec(s.lat, s.lon), fresh: s.new === 'country', s }));
     requestDraw();
   }
   // points: [[lat, lon, ...], ...] where stations are hearing the station's area (the band picked), or [] to clear.
   function setOpenings(points) {
-    st.openings = (points || []).map((p) => ({ v: vec(p[0], p[1]) }));
+    st.openings = (points || []).map((p) => ({ v: vec(p[0], p[1]), p }));
     requestDraw();
   }
+  // The stations WSJT-X has heard lately: [{call, lat, lon, ...}] as /api/ft8/heard sends them, or [] to clear.
+  function setFt8(list) {
+    st.ft8 = (list || []).filter((f) => f.lat !== null && f.lat !== undefined).map((f) => ({ v: vec(f.lat, f.lon), f }));
+    requestDraw();
+  }
+  // click(hit): a dot was clicked; hover(hit, event): the pointer is over one (hit is null when it leaves).
+  // hit is {open: p} for a green dot, {spot: s} for a spot, {ft8: f} for a station WSJT-X heard.
+  function onDot(click, hover) { dotClick = click; dotHover = hover; }
   // The FM satellite whose card is open: snap from /api/sat, foot round the circle it can be heard in.
   function setSat(snap, foot, name) {
     if (!snap || !snap.ok) { st.sat = null; requestDraw(); return; }
@@ -1277,8 +1344,11 @@ const Maps = (() => {
   }
 
   return {
-    init, setView, setTarget, setSpots, setHeard, setIss, focusHome, focusIss, pathTo, setHint, setZones, onZone,
-    setOpenings, setSat, focusSat,
+    init, setView, setTarget, setSpots, setHeard, setFt8, setIss, focusHome, focusIss, pathTo, setHint, setZones, onZone,
+    setOpenings, onDot, setSat, focusSat,
     available: () => st.ready, view: () => st.view, speed,
+    // where the green dots were drawn last (in the canvas), for the tests
+    openingHits: () => openHits.map((h) => ({ x: h.x, y: h.y, call: h.p[3] })),
+    spotHits: () => spotHits.map((h) => ({ x: h.x, y: h.y, call: h.s.call })),
   };
 })();

@@ -36,10 +36,31 @@ Map views .............. the buttons above the map: Flat map, Globe, Beam map. T
 CQ zones ............... the red numbers. Click one (or "CQ zones" on the map) for the zone's name,
                          its countries and prefixes, and which zones are in the log (for WAZ).
   hide them ............ "show_zones = no" under [display] in config.ini, then restart the app
+Log a contact .......... "Log this contact" on the station card. The button turns green and says Logged,
+                         and the My log tab gets a green dot. Pressing it again for the same station within
+                         15 minutes asks first ("Log it again?"). Undo on the message takes it back out;
+                         Add a note opens that contact's note.
 Stats .................. the Stats button (or "See your stats" under My log): contacts, countries,
-                         CQ zones, continents and bands, contacts per month, the furthest contact,
-                         the latest new ones, and every DXCC country with what's in the log.
-                         Point at a bar for its exact numbers.
+                         CQ zones, continents, stations, contacts per month, the furthest contact,
+                         the latest new ones, the stations talked to most, contacts on this date in past
+                         years, and every DXCC country with what's in the log. Point at a bar for its numbers.
+  Stations ............. everyone in the log, with the first and last contact and how many: search by call,
+                         name or country, and sort by latest, first met, most contacts, farthest or A to Z.
+                         Pick one for every contact with them, and add or change a note on any contact.
+                         "History and notes" on a station's card opens it there.
+Spots .................. each spot shows the frequency and the sideband the station is on: USB or LSB (the
+                         spotter's word for it if they gave one, otherwise the usual one for the band: LSB below
+                         10 MHz, USB above). Point at a blue spot on the map to see who it is, where they are on
+                         the dial and the spotter's note; click it to look them up. "Tune to" sets the radio to
+                         that frequency and sideband.
+Working split .......... a DX station listening somewhere else (the spot says UP 5, DN 2, QSX 14.210 ...) is marked
+                         by its country: UP5 = listening 5 kHz up. "Tune to" then sets the radio to listen
+                         on the DX station and transmit where they're listening (the near end of a range like
+                         UP 5-10). The radio box shows SPLIT and the transmit frequency, red if that's on another
+                         band. The station card's −1 kHz and +1 kHz move the transmit frequency, and Split off
+                         ends it. Tuning to a station that isn't working split turns split off. It never sets a
+                         transmit frequency that would put the signal outside the band (or, on SSB, outside the
+                         voice part of the band), and it never transmits.
 New ones ............... badges in the spot list: NEW = a country not in the log yet, ZONE = a new
                          CQ zone, BAND = a country in the log but not on that band yet. New countries
                          also get an amber ring on the maps.
@@ -76,8 +97,9 @@ Alerts ................. a banner on the map for Environment Canada weather aler
                          "Full warning" opens the alert in the web browser; the X hides it until it
                          changes. Thunderstorm alerts carry a reminder to disconnect the antennas.
                          The chip on Band conditions shows space weather at a glance (click for NOAA).
-  settings ............. [alerts] in config.ini: weather_region (Canada only, for example abrm40 = Red Deer
-                         Co. near Pine Lake; blank turns weather alerts off) and space_weather (yes or no)
+  settings ............. [alerts] in config.ini: weather_region (Canada only: the code at the end of your
+                         area's alert page address on weather.gc.ca/warnings; blank turns weather alerts off)
+                         and space_weather (yes or no)
 Satellite passes ....... the tile at the bottom: the next passes of the ISS and the FM satellites (SO-50, AO-123,
                          AO-91, PO-101). Click one for where to point, its frequencies (with the Doppler steps on
                          70 cm), its notes, and AMSAT's latest reports. The sky chart is the pass: the edge is the
@@ -86,20 +108,84 @@ Satellite passes ....... the tile at the bottom: the next passes of the ISS and 
 Who can hear you ....... the tile at the bottom. "Where stations near you are being heard" comes from PSK Reporter:
                          FT8 and other digital signals sent from about 200 km around you, and who decoded them, in
                          the last 15 minutes. Click a band to see those stations on the map as green dots (on the
-                         beam map, lines out from the middle show which way the band is open). Esc or the X hides
-                         them. Once you run FT8 yourself, it also says how many stations decoded you.
+                         beam map, lines out from the middle show which way the band is open). Point at a green
+                         dot to see who it is and which station near you they heard; click it to look them up.
+                         Esc or the X hides them. Once you run FT8 yourself, it also says how many stations
+                         decoded you.
                          DX cluster spots of your callsign are listed there too, with their paths on the map.
   switch it off ........ "enabled = no" under [openings] in config.ini (it uses 50 to 100 MB a day when busy)
 Listen to yourself ..... the button on that tile: public KiwiSDR receivers a good distance away for the radio's
                          band (the ones in your beam first, if a station is looked up). "Listen" opens one in the
                          web browser, tuned to the radio's frequency. Say your call and hear yourself a second later.
-Waterfall .............. with an RTL-SDR on the radio's IF and "start = yes" under [waterfall] in config.ini,
-                         Gqrx opens by itself on the computer's own screen and reopens if it's closed.
-                         Its scale follows the radio's frequency (if_hz is the radio's IF).
-  turn it off .......... systemctl --user disable --now station-waterfall   (back on: enable --now)
-  restart it ........... systemctl --user restart station-waterfall
-  its messages ......... journalctl --user -u station-waterfall -n 30
-  its settings ......... ~/.config/gqrx/station.conf (gain and display changes made in Gqrx are kept)
+Waterfall .............. with an RTL-SDR on the radio's IF and "start = yes" under [waterfall] in config.ini, the
+                         band around the radio's frequency shows on the computer's own screen, centred on the dial
+                         like a radio's own scope. It follows the dial, the band and the sideband by itself, and
+                         reopens a few seconds after it's closed. The buttons at the top show 20 kHz up to the
+                         whole band. Click a signal, or a DX spot's callsign on one, to tune there. While the radio
+                         transmits, its lines show red, marked TX with the frequency (the split one when split is on).
+  reopen it ............ systemctl --user restart station-waterfall
+  close it for now ..... systemctl --user stop station-waterfall   (it opens again when the computer restarts)
+  turn it off .......... "start = no" under [waterfall] in config.ini, then restart the app
+  its messages ......... journalctl --user -u station-waterfall -n 30   (the window; the receiver's are the app's)
+  on frequency ......... about once a minute it checks itself against shortwave broadcast stations (their
+                         carriers sit exactly on 5 kHz steps) and corrects small drift by itself. It keeps that
+                         for each of the radio's modes, since the radio can put USB and LSB a little differently.
+  picture settings ..... gain, swap_iq (which way round), offset_hz and ppm under [waterfall] in config.ini.
+                         The health report says what the waterfall has found out about them.
+Windows ................ on the computer's own screen, whatever opens (WSJT-X, the web browser for a favourite, a
+                         look-up or Listen to yourself, any other program) goes in a side area on the right, and the
+                         waterfall narrows to the left to make room, so it stays whole and clickable. When nothing
+                         is left beside it (closed or minimized), the waterfall takes the whole screen again.
+                         Something that opens over the station display comes over too. WSJT-X's Wide Graph goes
+                         along the bottom and its main window above it (all the way down while the Wide Graph is
+                         closed); the side area widens a little for WSJT-X, whose Wide Graph can't be narrower than
+                         about 845 pixels. Moved or resized by hand, a window stays where it's put. A program's own
+                         small windows (Save as, Log QSO, settings) open over it as usual.
+  wider or narrower .... side_width under [layout] in config.ini (800 pixels; never less than a window there
+                         needs), then systemctl --user restart station-windows
+  turn it off .......... "keep = no" under [layout] in config.ini, then systemctl --user restart station-windows
+  its messages ......... journalctl --user -u station-windows -n 30
+Remote listening ....... "station listen" on another computer (the Pi) opens the waterfall in its web browser with a
+                         Listen button, and plays the sound from the waterfall's own receiver. Follow the radio plays
+                         its frequency: both sides of a contact, your own signal too while you transmit. Where I click
+                         plays any signal clicked on, in USB, LSB, AM or CW, with a fine tune. It only listens: it
+                         never tunes the radio or transmits. While someone listens, the waterfall here shows "Remote
+                         listener", and the health report says what they're listening to.
+FT8 (WSJT-X) ........... the FT8 button at the top of the waterfall, or Menu > WSJT-X (FT8) (or type FT8 in the
+                         menu's search), opens WSJT-X beside the waterfall (the button has a green light while WSJT-X
+                         is open). Pressed again, the button puts WSJT-X away (minimized: it keeps listening, and the
+                         map keeps filling in), and once more brings it back; if something covers WSJT-X, it brings
+                         WSJT-X to the front. It hears the radio
+                         through the waterfall's receiver and follows the radio's frequency: tune the radio to an FT8
+                         frequency (20 m: 14.074 USB) and the stations it decodes appear in Band Activity every 15
+                         seconds. They also show on the station display's map as small violet dots for 15 minutes
+                         (from WSJT-X's own reports on 127.0.0.1:2237): point at one for who it is, how strong and
+                         how far; click it to look them up. For now it only receives: the radio has no sound cable
+                         for digital modes yet, WSJT-X's sound goes nowhere, and its link to the radio refuses
+                         anything that would make the radio transmit. If WSJT-X starts a transmission (Enable Tx, or
+                         a double-click on a CQ), nothing goes on the air; Halt Tx stops it. When WSJT-X opens, it
+                         moves the radio's frequency a few tens of hertz and back (it's checking how finely the radio
+                         tunes).
+  its settings ......... the installer gives WSJT-X the station's settings the first time (File > Settings):
+                         General: callsign and grid (4 characters, all FT8 sends); Radio: Rig "Hamlib NET rigctl",
+                         Network Server 127.0.0.1:4534, PTT Method VOX, Mode None, Split Operation None; Audio:
+                         Input station_receiver (Mono), Output station_no_transmit. Leave the Radio and Audio ones
+                         as they are: the health report says if WSJT-X's radio or sound input changes.
+  the clock ............ FT8 needs the computer's clock right to within a second; the health report's Clock line
+                         says whether it keeps in step with internet time.
+  PSK Reporter ......... WSJT-X can share the stations it hears with pskreporter.info (File > Settings > Reporting >
+                         Enable PSK Reporter Spotting). It then sends this station's callsign and the grid in
+                         General, so keep that to 4 characters (DO32): anything longer goes public too. The health
+                         report's PSK Reporter line says whether it's on, and as whom.
+  no decodes? .......... the Monitor button should be green, WSJT-X's Mode menu on FT8 and the radio on an FT8
+                         frequency; WSJT-X's sound meter (bottom left) shows about 30 dB with just noise (more on a
+                         busy band, where the signals add up). The health report's FT8 and Clock lines say if
+                         anything is wrong on the station's side. When the radio is on an FT8 frequency and still
+                         nothing comes, the band is probably just quiet: the FT8 stations line then names the band
+                         the most stations near you are being heard on (from PSK Reporter), and WSJT-X's band
+                         buttons (20, 10...) tune the radio to its FT8 frequency.
+  turn it off .......... "enabled = no" under [ft8] in config.ini, then restart the app
+  its messages ......... journalctl --user -u station-app -n 50 | grep FT8
 
 Data sources: AD1C country file (country-files.com); DX spots from public DX cluster nodes;
 band conditions from N0NBH (hamqsl.com); ISS orbits from CelesTrak; Canadian hams'
@@ -114,8 +200,10 @@ rx.linkfanel.net and kiwisdr.com.
 
 From another computer (a Raspberry Pi, say), the "station" command in the app's remote folder
 does most of this over SSH:
-station status, station screen, station update FILE, station settings,
+station status, station screen, station listen, station update FILE, station settings,
 station restart, station radio2, station feedback, station logs, station backups,
 station ssh, station host.
 "station screen" shows the station display; "station screen laptop" shows the
-computer's own screen (where the waterfall is); "station screen both" shows both.
+computer's own screen (where the waterfall is); "station screen both" shows both. Each
+picture is shrunk to fit the other computer's screen, so nothing is cut off.
+"station listen" plays the radio's sound there (see Remote listening).

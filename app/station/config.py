@@ -31,6 +31,24 @@ def _yes(text):
     return text.strip().lower() not in ("no", "false", "off", "0")
 
 
+def _gain(text):
+    """The waterfall SDR's gain in dB; 0 means its own automatic gain ("auto" in config.ini)."""
+    if text.strip().lower() == "auto":
+        return 0.0
+    value = _float(text)
+    return value if value is not None and 0 <= value <= 50 else 25.0
+
+
+def _swap(text):
+    """Which way round the waterfall's picture is: "yes" (back to front), "no", or "auto" (found from the dial)."""
+    text = text.strip().lower()
+    if text in ("yes", "true", "on", "1"):
+        return "yes"
+    if text in ("no", "false", "off", "0"):
+        return "no"
+    return "auto"
+
+
 def _timezone(name):
     """The time zone set in config.ini if it's a real one, otherwise this computer's (or UTC)."""
     try:
@@ -149,7 +167,11 @@ def load():
         note=get("personal", "note"),
         helper=get("personal", "helper"),    # who looks after the station: the checklist notes are for them
         waterfall_start=_yes(get("waterfall", "start", "no")),
-        waterfall_follow=_yes(get("waterfall", "follow_radio", "yes")),
         waterfall_if_hz=_int(get("waterfall", "if_hz", "69450000"), 69450000),
-        waterfall_port=_int(get("waterfall", "remote_port", "7356"), 7356),
+        waterfall_gain=_gain(get("waterfall", "gain", "25")),
+        waterfall_swap=_swap(get("waterfall", "swap_iq", "auto")),
+        waterfall_offset=_int(get("waterfall", "offset_hz", "0"), 0),
+        waterfall_ppm=_int(get("waterfall", "ppm", "0"), 0),
+        ft8=_yes(get("ft8", "enabled", "no")),   # WSJT-X fed from the waterfall's receiver (a virtual microphone)
+        ft8_rig_port=_int(get("ft8", "rig_port", "4534"), 4534),   # WSJT-X's receive-only radio link
     )

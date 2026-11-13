@@ -13,7 +13,10 @@ usage() {
 station status            Health report: app, radio link, spots, backups, version
 station screen            See the big screen (the station display) live
 station screen laptop     See the computer's own screen (the waterfall)
-station screen both       See both screens, shrunk to fit
+station screen both       See both screens
+                            (each picture is shrunk to fit this computer's screen)
+station listen            Hear the radio here: opens the waterfall with a Listen button in this computer's
+                            web browser (it never tunes the radio or transmits)
 station update FILE       Install a new version, for example:
                             station update ~/Downloads/station-app-0.3.0.tar.gz
 station settings          Edit the station settings, then restart the app
@@ -21,7 +24,7 @@ station restart           Restart the app and the radio links
 station radio2            Connect the second radio (finds its cable and speed, then shows it)
 station radio2 --check    Only test the second radio's cable; nothing is changed
 station feedback          Show the answers and notes from the tester checklist
-station logs              Show the app's recent messages
+station logs              Show the app's recent messages (and the window layout's)
 station backups           Copy the logbook backups to this computer
 station ssh               Open a terminal on the station computer
 station host              Show or change which station computer this looks after
@@ -39,6 +42,23 @@ ask_host() {
   mkdir -p "$(dirname "$HOST_FILE")"
   printf '%s\n' "$host" > "$HOST_FILE"
   echo "Saved. This computer now looks after $host."
+}
+
+# The room this computer's screen has for "station screen"'s picture (WxH): the screen less a margin for its top bar,
+# the viewer's own title bar and its edges, so the station's screen shows whole (its taskbar too) with nothing cut
+# off. Nothing if it can't tell (the station then shrinks the picture to about 1600 x 880, as before).
+screen_room() {
+  command -v xrandr >/dev/null 2>&1 || return 0
+  xrandr --current 2>/dev/null | awk '
+    $2 == "connected" {
+      for (i = 3; i <= NF; i++)
+        if ($i ~ /^[0-9]+x[0-9]+[+][0-9]+[+][0-9]+$/) {
+          split($i, g, /[x+]/)
+          if ($3 == "primary" || !w) { w = g[1]; h = g[2] }
+          break
+        }
+    }
+    END { if (w > 600 && h > 400) printf "%dx%d", w - 24, h - 112 }'
 }
 
 case "${1:-help}" in help|-h|--help) usage; exit 0 ;; esac
@@ -65,10 +85,56 @@ case "${1:-help}" in
       echo "First install the viewer:  sudo apt install -y tigervnc-viewer"
       exit 1
     fi
+    room="$(screen_room)"
+    if [ -z "$room" ] && ! command -v xrandr >/dev/null 2>&1; then
+      echo "(To have the picture fit this screen, install xrandr:  sudo apt install -y x11-xserver-utils)"
+    fi
     echo "Connecting to the $which screen. Close the viewer window when you're done."
-    ssh -f -o ExitOnForwardFailure=yes -L 5901:127.0.0.1:5900 "$HOST" "~/station/app/bin/share-screen.sh $which"
+    ssh -f -o ExitOnForwardFailure=yes -L 5901:127.0.0.1:5900 "$HOST" "~/station/app/bin/share-screen.sh $which $room"
     sleep 2
     "$viewer" localhost::5901 >/dev/null 2>&1
+    ;;
+  listen)
+    # The station app only answers on the station itself, so an SSH tunnel brings it here, on another port
+    # (STATION_LISTEN_PORT picks a different one). The page plays the sound from the waterfall's receiver.
+    port="${STATION_LISTEN_PORT:-18073}"
+    url="http://127.0.0.1:$port/listen"
+    if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+      echo "Port $port is already in use here (is station listen already running in another window?)."
+      echo "To use another one:  STATION_LISTEN_PORT=18074 station listen"
+      exit 1
+    fi
+    echo "Connecting to the station..."
+    ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -L "127.0.0.1:$port:127.0.0.1:8073" "$HOST" &
+    tunnel=$!
+    # A job started with & here doesn't see Ctrl+C, so close the tunnel on the way out, however that comes.
+    trap 'kill "$tunnel" 2>/dev/null || true' EXIT
+    trap 'echo; echo "Stopped listening."; exit 0' INT TERM HUP
+    answered=""
+    for _ in $(seq 1 60); do
+      if ! kill -0 "$tunnel" 2>/dev/null; then
+        echo "Couldn't connect. If port $port is in use here, pick another, for example:  STATION_LISTEN_PORT=18074 station listen"
+        exit 1
+      fi
+      if command -v curl >/dev/null 2>&1; then
+        curl -fs -o /dev/null --max-time 3 "http://127.0.0.1:$port/api/health" && answered=1
+      elif command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=3)' \
+          "http://127.0.0.1:$port/api/health" 2>/dev/null && answered=1
+      else
+        (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null && answered=1
+      fi
+      [ -n "$answered" ] && break
+      sleep 0.5
+    done
+    if [ -z "$answered" ]; then
+      echo "The station app didn't answer. Is it running? (station status)"
+      exit 1
+    fi
+    echo "The listening page:  $url"
+    echo "Press Listen there. Keep this window open while you listen; press Ctrl+C here when you're done."
+    xdg-open "$url" >/dev/null 2>&1 || echo "Open that address in a web browser on this computer."
+    wait "$tunnel" || true
     ;;
   update)
     file="${2:-}"
@@ -109,7 +175,8 @@ case "${1:-help}" in
     ssh "$HOST" 'python3 ~/station/app/bin/feedback.py'
     ;;
   logs)
-    ssh "$HOST" 'journalctl --user -u station-app -n 60 --no-pager'
+    # the app's messages, and the window layout's (station-windows) among them
+    ssh "$HOST" 'journalctl --user -u station-app -u station-windows -n 80 --no-pager'
     ;;
   backups)
     # The folder is named after the station's callsign, for example ~/VE6LDM-backups.

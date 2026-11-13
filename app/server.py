@@ -22,7 +22,7 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(APP_DIR))
 
-from station import alerts, canada, checklist, cluster, conditions, config, contests, cty, favourites, geo, hamqth, kiwi, logbook, pskr, rig, satellites, waterfall  # noqa: E402
+from station import alerts, canada, checklist, cluster, conditions, config, contests, cty, favourites, ft8, geo, hamqth, kiwi, listen, logbook, pskr, rig, satellites, waterfall, wsjtx_udp  # noqa: E402
 from station import USER_AGENT  # noqa: E402
 
 VERSION = (APP_DIR / "VERSION").read_text().strip() if (APP_DIR / "VERSION").exists() else "dev"
@@ -44,6 +44,9 @@ LOG = logbook.Logbook(DATA / "logbook.sqlite3")
 CTY = cty.CountryFile(DATA / "cty.dat")
 HQ = hamqth.HamQTH(CFG.hamqth_user, CFG.hamqth_pass) if CFG.hamqth_user and CFG.hamqth_pass else None
 HOSTS = {"127.0.0.1:%d" % CFG.port, "localhost:%d" % CFG.port}
+# The same names on another port: the app reached through an SSH tunnel from another computer ("station listen"
+# forwards a port there to this one). Only these literal names: a web page can't make its own name look like them.
+LOOPBACK_HOST = re.compile(r"^(?:127\.0\.0\.1|localhost):\d{1,5}$")
 BOOT = str(int(time.time()))  # lets the display notice a restart and reload itself
 
 
@@ -62,9 +65,21 @@ def system_boot():
 SYSTEM_BOOT = int(os.environ.get("STATION_SYSTEM_BOOT") or system_boot())   # the setting is for tests
 CHECKLIST = checklist.Checklist(config.DATA_DIR / "checklist.json")
 FAVS = favourites.Favourites(config.STATION_DIR, say=lambda message: print(message, flush=True), callsign=CFG.callsign)
-# Keeps the waterfall's scale (Gqrx, on the computer's own screen) on the radio's frequency.
-SCALE = waterfall.Scale(port=CFG.waterfall_port, if_hz=CFG.waterfall_if_hz,
-                        enabled=CFG.waterfall_follow and CFG.radio_model >= 2)
+# The waterfall: an SDR on the first radio's IF, shown on the computer's own screen (see station/waterfall.py).
+# Its picture is placed by the first radio's readings; it never sends anything to the radio.
+WATERFALL = waterfall.Waterfall(DATA, radio=lambda: waterfall_radio(), if_hz=CFG.waterfall_if_hz, gain=CFG.waterfall_gain,
+                                ppm=CFG.waterfall_ppm, swap=CFG.waterfall_swap, offset_hz=CFG.waterfall_offset,
+                                enabled=CFG.waterfall_start and CFG.radio_model >= 1,
+                                connect=os.environ.get("STATION_WF_RTL_TCP") or None, log=lambda text: say(text))
+# Sound from the waterfall's SDR, for listening from another computer (see station/listen.py and "station listen").
+LISTEN = listen.Listening(say=lambda text: say(text))
+WATERFALL.listening = LISTEN
+# FT8: WSJT-X's microphone fed from the waterfall's receiver while WSJT-X runs (see station/ft8.py).
+FT8 = ft8.Ft8(LISTEN, DATA, say=lambda text: say(text), enabled=CFG.ft8 and WATERFALL.enabled,
+              rig_port=CFG.rig_port, link_port=CFG.ft8_rig_port)
+# ...and the stations WSJT-X hears, from its own network messages, for the map (see station/wsjtx_udp.py).
+FT8_HEARD = wsjtx_udp.Listener(lambda call: place_of(call), home=(CFG.lat, CFG.lon) if CFG.location_set else None,
+                               say=lambda text: say(text)) if FT8.enabled else None
 
 ALERTS = alerts.Alerts(DATA, CFG.weather_region, space=CFG.space_weather,
                        space_url=CFG.alerts_space_url, weather_url=CFG.alerts_weather_url)
@@ -75,6 +90,11 @@ VOICE_KHZ = [(3600, 4000), (7125, 7300), (14150, 14350), (18110, 18168), (21200,
              (24930, 24990), (28300, 29700), (50100, 54000)]
 NOT_VOICE = re.compile(r"\b(FT8|FT4|CW|RTTY|PSK\d*|JT65|JS8|SSTV|BEACON|BCN)\b", re.I)
 VOICE_WORD = re.compile(r"\b(SSB|USB|LSB|PHONE)\b", re.I)
+SIDEBAND_WORD = re.compile(r"\b(USB|LSB)\b", re.I)
+# A DX station working split says where it listens: "UP 5", "UP 5-10", "DN 2", "QSX 14.210", "LSN 7180".
+SPLIT_UPDN = re.compile(r"\b(UP|DN|DWN|DOWN)(?![A-Z])\s*(\d{1,2}(?:\.\d)?)?(?:\s*(?:-|TO|/)\s*(\d{1,2}(?:\.\d)?))?", re.I)
+SPLIT_QSX = re.compile(r"\b(?:QSX|LSN|LSTN|LISTENING)\s*(?:ON\s*)?(\d{1,5}(?:\.\d{1,3})?)(?![\d.])", re.I)
+SPLIT_MAX_KHZ = 50   # further than this, it isn't a split (or it was misread)
 ORIGINS = {"http://" + host for host in HOSTS}
 
 
@@ -198,6 +218,114 @@ def is_voice(spot):
     return any(low <= spot["freq_khz"] <= high for low, high in VOICE_KHZ)
 
 
+def sideband_for(freq_khz):
+    """The usual sideband for voice: LSB below 10 MHz, USB from 10 MHz up (and on the 60 m channels)."""
+    return "USB" if freq_khz >= 10000 or 5250 <= freq_khz <= 5450 else "LSB"
+
+
+def spot_mode(spot):
+    """What a spotted station is on. For voice, USB or LSB: the spotter's word for it if the comment has one,
+    otherwise the usual sideband for the band. For CW and digital, the mode the comment names (CW, FT8, ...).
+    "" when it isn't known."""
+    comment = spot.get("comment") or ""
+    named = NOT_VOICE.search(comment)
+    if named:
+        word = named.group(1).upper()
+        return "" if word in ("BEACON", "BCN") else word
+    side = SIDEBAND_WORD.search(comment)
+    if side:
+        return side.group(1).upper()
+    return sideband_for(spot["freq_khz"]) if is_voice(spot) else ""
+
+
+def split_problem(rx_hz, tx_hz, mode):
+    """Why the radio shouldn't be set to transmit on tx_hz while it listens on rx_hz, or None if it can:
+    the same band, not too far, and the whole signal inside the band (for USB and LSB, inside the voice
+    part of the band, where an SSB signal takes up 3 kHz above or below the frequency)."""
+    band = logbook.band_for(rx_hz)
+    if band is None or logbook.band_for(tx_hz) != band:
+        return "that's outside the band"
+    if abs(tx_hz - rx_hz) > SPLIT_MAX_KHZ * 1000:
+        return "that's more than %d kHz away" % SPLIT_MAX_KHZ
+    if mode in ("USB", "LSB"):
+        low, high = next((lo, hi) for lo, hi, name in logbook.BANDS if name == band)
+        part = next(((lo * 1000, hi * 1000) for lo, hi in VOICE_KHZ if low <= lo * 1000 <= high), None)
+        if part is None:
+            return "there's no voice on %s" % band.replace("m", " m")
+        bottom, top = (tx_hz, tx_hz + 3000) if mode == "USB" else (tx_hz - 3000, tx_hz)
+        if bottom < part[0] or top > part[1]:
+            return "that would put your signal outside the voice part of %s (%.3f to %.3f MHz)" % (
+                band.replace("m", " m"), part[0] / 1e6, part[1] / 1e6)
+    return None
+
+
+def _qsx_khz(text, rx_khz):
+    value = float(text)
+    if "." in text and value < 100:
+        return value * 1000                       # 14.210 (MHz)
+    if value < 1000:
+        return int(rx_khz // 1000) * 1000 + value  # 210, meaning 14.210 on 20 m
+    return value                                  # 14210 (kHz)
+
+
+def spot_split(spot):
+    """Where a spotted DX station is listening, if it's working split, from the spot's comment:
+    {'dir': 'up', 'khz': 5.0, 'to': 10.0, 'tx_khz': 14245.0, 'why': None}. khz is how far, to the far end of a
+    range ("UP 5-10"); both are None for a bare "UP". tx_khz is where to transmit (the near end of a range),
+    and why says why the radio shouldn't be set there (outside the band, say). None if it isn't split."""
+    comment = spot.get("comment") or ""
+    rx = spot["freq_khz"]
+    updn, qsx = SPLIT_UPDN.search(comment), SPLIT_QSX.search(comment)
+    after = comment[updn.end():updn.end() + 6].strip().upper() if updn else ""
+    if updn and updn.group(2) and not after.startswith("DB"):
+        up = updn.group(1).upper() == "UP"
+        khz = float(updn.group(2))
+        far = float(updn.group(3)) if updn.group(3) else None
+    elif qsx:
+        diff = round(_qsx_khz(qsx.group(1), rx) - rx, 1)
+        if diff == 0:
+            return None
+        up, khz, far = diff > 0, abs(diff), None
+    elif updn and not updn.group(2):
+        return {"dir": "up" if updn.group(1).upper() == "UP" else "down", "khz": None, "to": None,
+                "tx_khz": None, "why": None}
+    else:
+        return None
+    if not 0 < khz <= SPLIT_MAX_KHZ:
+        return None
+    if far is not None and not khz < far <= SPLIT_MAX_KHZ:
+        far = None
+    tx = round(rx + (khz if up else -khz), 1)
+    mode = spot_mode(spot)
+    return {"dir": "up" if up else "down", "khz": khz, "to": far, "tx_khz": tx,
+            "why": split_problem(int(rx * 1000), int(tx * 1000), mode if mode in ("USB", "LSB") else None)}
+
+
+def ft8_heard(why=False):
+    """/api/ft8/heard: the stations WSJT-X has heard in the last 15 minutes, for the map. With why (the health
+    report asks for it), when there are none: why not, as best it can be told (wsjtx_udp.quiet_hint), naming the
+    band the most stations near here are being heard on (PSK Reporter), among the bands the FT-950, the radio WSJT-X
+    follows, has antennas for."""
+    if FT8_HEARD is None:
+        return {"on": False, "stations": []}
+    out = dict(FT8_HEARD.status(), on=True)
+    if why and not out["stations"] and not out["problem"]:
+        f8 = FT8.status()
+        ws = f8.get("wsjtx_settings") or {}
+        busiest = None
+        if OPENINGS is not None and out.get("dial_hz"):
+            counts = {b["band"]: b["receivers"] for b in OPENINGS.summary().get("bands", [])}
+            mine = [b for b in CFG.radio_bands if counts.get(b)]
+            if mine:
+                top = max(mine, key=lambda b: counts[b])
+                busiest = {"band": top, "receivers": counts[top], "here": counts.get(logbook.band_for(out["dial_hz"]), 0)}
+        since = f8.get("since")
+        out["hint"] = wsjtx_udp.quiet_hint(
+            out, bool(f8.get("wsjtx")), open_for=(time.time() - since) if since else None,
+            udp=(ws.get("udp_server"), ws.get("udp_port")) if ws.get("readable") else None, busiest=busiest)
+    return out
+
+
 def place_of(call):
     """Country, region and map position for a callsign (Canadian hams in their own towns)."""
     entity = CTY.lookup(call) or {}
@@ -255,8 +383,11 @@ def spots_json(band, voice_only, minutes=30):
         item = dict(spot, **place_of(spot["call"]))
         item["time"] = iso(spot["time"])
         item["age_min"] = max(0, int((now - spot["time"]).total_seconds() // 60))
+        item["mode"] = spot_mode(spot)
+        item["split"] = spot_split(spot)
         if item["lat"] is not None:
             item["bearing"] = round(geo.bearing(CFG.lat, CFG.lon, item["lat"], item["lon"]))
+            item["distance_km"] = round(geo.distance_km(CFG.lat, CFG.lon, item["lat"], item["lon"]))
         item["new"] = new_for_log(item, worked)
         out.append(item)
     return {"status": CLUSTER.status, "node": CLUSTER.host, "spots": out[:60], "counts": counts}
@@ -392,17 +523,22 @@ class RadioUnit:
         self._off_since = None  # when it stopped answering
         self.shown = lambda: True   # Radios replaces this: is it the radio on the display?
         self.lock = threading.Lock()
+        self.split = None           # the radio's split, read every few seconds: {'on': ..., 'tx_hz': ...}
+        self._split_at = 0.0        # when it was last read (0: read it on the next reading)
 
     @property
     def set_up(self):
         return self.model != 0
 
     def poll(self):
-        status = self.rig.status()
+        read_split = time.time() - self._split_at >= 1.5   # split changes seldom: read it now and then
+        status = self.rig.status(split=read_split)
         self.watch.seen(status.get("ok"))
+        if status.get("ok") and read_split:
+            self.split, self._split_at = status.get("split"), time.time()
         if status.get("ok"):
-            if self.primary:
-                SCALE.note(status.get("freq_hz"))    # the waterfall belongs to the first radio
+            status["split"] = self.split
+        if status.get("ok"):
             if status.get("tx"):                     # read-only meter readings while transmitting
                 meters = self.rig.meters()
                 status.update(meters)
@@ -430,7 +566,8 @@ class RadioUnit:
                 self.poll()
             except Exception as exc:      # never let one bad reading stop the radio's reader
                 say("%s reading failed: %s" % (self.name, exc))
-            every = 0.5 if self.shown() else 1.5
+            # Twice a second while it's on the display, or while the waterfall (on the first radio's IF) needs it.
+            every = 0.5 if self.shown() or (self.primary and WATERFALL.enabled) else 1.5
             time.sleep(max(0.25, every - (time.time() - started)))
 
     def start(self):
@@ -440,6 +577,13 @@ class RadioUnit:
     def reading(self):
         with self.lock:
             return dict(self.status, name="Practice" if self.model == 1 else self.name, radio=self.key)
+
+    def note_split(self, split):
+        """What the radio's split was just set to, shown until the next reading of it."""
+        with self.lock:
+            self.split, self._split_at = split, time.time()
+            if self.status.get("ok"):
+                self.status = dict(self.status, split=split)
 
 
 class Radios:
@@ -487,21 +631,85 @@ class Radios:
                          for u in self.units if u is not active]
         return out
 
-    def tune(self, freq_hz, mode):
-        """Tunes the radio in use; if it has no antenna for that band and the other radio does (and is on), that one."""
+    def tune(self, freq_hz, mode, split_tx_hz=None, radio=None, keep_split=False):
+        """Tunes the radio in use; if it has no antenna for that band and the other radio does (and is on), that one.
+        With split_tx_hz (a DX station listening elsewhere) it also sets the radio to transmit there. Tuning to
+        a station that isn't working split turns split off, so the radio doesn't transmit somewhere else.
+        radio picks the radio instead ("radio" for the waterfall's); keep_split leaves split as it is (a click
+        on the waterfall moves where the radio listens, and nothing else)."""
         band = logbook.band_for(int(freq_hz or 0))
         active = self.active()
         target, note = active, None
-        if band and band not in active.bands:
+        if radio is not None:
+            target = self.unit(radio)
+            if target is None:
+                raise ValueError("There's no radio called that.")
+            if not target.status.get("ok"):
+                return {"ok": False, "radio": target.name, "why": "the %s isn't answering" % target.name}
+            if band and band not in target.bands:
+                return {"ok": False, "radio": target.name, "no_antenna": band}
+        elif band and band not in active.bands:
             other = next((u for u in self.units if u is not active and u.status.get("ok") and band in u.bands), None)
             if other:
                 target, note = other, "the %s has no %s antenna" % (active.name, band.replace("m", " m"))
             else:
                 return {"ok": False, "radio": active.name, "no_antenna": band}
-        ok = target.rig.tune(freq_hz, mode)
+        split = None
+        why = split_problem(int(freq_hz), int(split_tx_hz), mode) if split_tx_hz else None
+        if split_tx_hz and not why:
+            now = target.rig.set_split(split_tx_hz, mode, rx_hz=freq_hz)
+            if now is not None:
+                ok = True
+                target.note_split(now)
+                split = dict(now, set=bool(now.get("on")))
+            else:   # it didn't take split: make sure it's at least listening in the right place
+                ok = target.rig.tune(freq_hz, mode)
+                split = {"set": False, "why": "the %s didn't take split" % target.name}
+        else:
+            ok = target.rig.tune(freq_hz, mode)
+            if split_tx_hz:
+                split = {"set": False, "why": why}
+            if ok and not keep_split and (target.split or {}).get("on"):
+                off = target.rig.clear_split()
+                if off:
+                    target.note_split({"on": False})
+                split = dict(split or {}, off=off)
         if ok:
             self.pick(target.key)
-        return {"ok": ok, "radio": target.name, "note": note}
+        return {"ok": ok, "radio": target.name, "note": note, "split": split}
+
+    def set_split(self, tx_hz=None, step_hz=None, off=False):
+        """Split on the radio showing: off, transmit on tx_hz, or move the transmit frequency by step_hz
+        (from where the radio listens, if split is off). It never transmits."""
+        unit = self.active()
+        r = unit.reading()
+        if not r.get("ok"):
+            return {"ok": False, "radio": unit.name, "why": "the %s isn't answering" % unit.name}
+        if off:
+            ok = unit.rig.clear_split()
+            if ok:
+                unit.note_split({"on": False})
+            return {"ok": ok, "radio": unit.name, "split": {"on": False} if ok else unit.split}
+        current = unit.split or {}
+        if step_hz is not None:
+            step = int(step_hz)
+            if not 0 < abs(step) <= 10_000:
+                raise ValueError("Steps go up to 10 kHz.")
+            base = current["tx_hz"] if current.get("on") and current.get("tx_hz") else r["freq_hz"]
+            tx_hz = base + step
+        tx_hz = int(tx_hz or 0)
+        mode = r.get("mode") if r.get("mode") in ("USB", "LSB") else None
+        why = split_problem(r["freq_hz"], tx_hz, mode)
+        if why:
+            return {"ok": False, "radio": unit.name, "why": why, "split": current or None}
+        try:
+            now = unit.rig.set_split(tx_hz, mode)
+        except ValueError as exc:
+            return {"ok": False, "radio": unit.name, "why": str(exc), "split": current or None}
+        if now is None:
+            return {"ok": False, "radio": unit.name, "why": "the %s didn't take it" % unit.name, "split": current or None}
+        unit.note_split(now)
+        return {"ok": bool(now.get("on")), "radio": unit.name, "split": now}
 
 
 RADIOS = Radios([
@@ -576,6 +784,19 @@ class DisplayWatch:
 
 
 SCREEN = DisplayWatch()
+
+
+def waterfall_info():
+    """What the waterfall page needs once: the band edges and voice parts to mark, and how the waterfall is."""
+    return {"on": WATERFALL.enabled, "status": WATERFALL.status(), "radio": waterfall_radio(), "callsign": CFG.callsign,
+            "bands": [{"name": name, "lo": lo, "hi": hi} for lo, hi, name in logbook.BANDS],
+            "voice": [[lo * 1000, hi * 1000] for lo, hi in VOICE_KHZ]}
+
+
+def waterfall_radio():
+    """The waterfall's radio (the first one): its latest reading, read in the background like the display's."""
+    unit = RADIOS.unit("radio") if RADIOS else None
+    return unit.reading() if unit else {"ok": False}
 
 
 def radio_status():
@@ -682,6 +903,21 @@ def stats_json():
     firsts += [{"kind": "zone", "name": "CQ zone %d" % zone, "call": w["first_call"], "time": w["first_time"]}
                for zone, w in worked["zones"].items()]
     firsts.sort(key=lambda f: f["time"], reverse=True)
+    # The stations, and the log's dates in the station's own time zone (for "on this day" and the years).
+    tz = station_tz()
+    today = datetime.now(tz)
+    stations = LOG.stations()
+    # The ones talked to most (more than once), the most recent first among equals.
+    regulars = sorted((st for st in stations if st["count"] > 1), key=lambda st: (st["count"], st["last"]), reverse=True)[:6]
+    on_day, per_year = [], {}
+    for c in contacts:
+        when = local_time(c["time_on"], tz)
+        per_year[when.year] = per_year.get(when.year, 0) + 1
+        if (when.month, when.day) == (today.month, today.day) and when.year < today.year:
+            on_day.append({"call": c["call"], "time": c["time_on"], "band": c["band"], "country": c["country"] or "",
+                           "mode": c["submode"] if c["mode"] == "SSB" and c["submode"] else c["mode"],
+                           "years": today.year - when.year})
+    years = [{"year": y, "contacts": per_year.get(y, 0)} for y in range(min(per_year), today.year + 1)] if per_year else []
     return {
         "total": len(contacts),
         "this_month": sum(1 for c in contacts if c["time_on"].startswith(now.strftime("%Y-%m"))),
@@ -694,8 +930,27 @@ def stats_json():
         "months": months,
         "furthest": furthest,
         "new_ones": firsts[:6],
+        "stations": {"unique": len(stations), "returning": sum(1 for st in stations if st["count"] > 1),
+                     "regulars": [{k: st.get(k) for k in ("call", "count", "first", "last", "name", "country")}
+                                  for st in regulars]},
+        "on_this_day": sorted(on_day, key=lambda d: d["time"], reverse=True)[:8],
+        "years": years,
         "country_file": CTY.loaded,
     }
+
+
+def station_tz():
+    """The station's time zone (from config.ini), for dates as the station's operator sees them; UTC if it can't be found."""
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(CFG.timezone) if CFG.timezone else timezone.utc
+    except Exception:
+        return timezone.utc
+
+
+def local_time(iso, tz):
+    """A logged time (UTC, 2026-10-01T19:42:00Z) in the given time zone."""
+    return datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(tz)
 
 
 def countries_json():
@@ -823,7 +1078,54 @@ class Handler(BaseHTTPRequestHandler):
                    {"Cache-Control": cache})
 
     def _host_ok(self):
-        return (self.headers.get("Host") or "").lower() in HOSTS
+        host = (self.headers.get("Host") or "").lower()
+        return host in HOSTS or bool(LOOPBACK_HOST.match(host))
+
+    def _listen_stream(self, query):
+        """The sound, for as long as the page listens (see station/listen.py for what's in it)."""
+        # Only the station's own pages send this; a page from anywhere else can't without asking first (and
+        # isn't answered), so it can't start the sound behind someone's back.
+        if self.headers.get("X-Station") != "listen":
+            return self._json({"error": "forbidden"}, 403)
+        if not WATERFALL.enabled:
+            return self._json({"error": "The waterfall is switched off, and the sound comes from its receiver."}, 409)
+        arg = lambda key, default=None: query.get(key, [default])[0]
+        follow = arg("freq") in (None, "")
+        try:
+            lst = LISTEN.add(follow=follow, freq_hz=None if follow else _int(arg("freq")) or 0,
+                             kind=arg("mode"), fine_hz=_int(arg("fine", "0")) or 0)
+        except listen.Full as exc:
+            return self._json({"error": str(exc)}, 503)
+        except (ValueError, TypeError) as exc:
+            return self._json({"error": str(exc)}, 400)
+        try:
+            self.connection.settimeout(20)   # a connection that stops taking the sound for 20 s is given up
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(listen.news_frame({"id": lst.id, "rate": listen.OUT_RATE, "bits": 16,
+                                                "callsign": CFG.callsign, "radio": waterfall_radio().get("name")}))
+            quiet = time.time()
+            while True:
+                items = lst.take(0.5)
+                if items:
+                    quiet = time.time()
+                elif time.time() - quiet >= 1.0:   # no sound coming: say why, now and then
+                    st = WATERFALL.status()
+                    why = ("the waterfall's receiver isn't running: %s" % st["problem"] if st.get("problem")
+                           else "waiting for the waterfall's receiver" if not st.get("running") else "waiting for sound")
+                    items = [listen.news_frame({"note": why[0].upper() + why[1:] + ".", "silent": True,
+                                                "listeners": LISTEN.count()})]
+                    quiet = time.time()
+                for item in items:
+                    self.wfile.write(item)
+        except (OSError, ValueError):
+            pass   # the page went away (or stopped taking the sound)
+        finally:
+            LISTEN.remove(lst)
+        self.close_connection = True
 
     def do_GET(self):
         if not self._host_ok():
@@ -834,6 +1136,26 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path in ("/", "/index.html"):
                 return self._static("index.html")
+            if path in ("/waterfall", "/listen"):   # /listen: the same page, for listening from another computer
+                return self._static("waterfall.html")
+            if path == "/api/listen":
+                return self._listen_stream(query)
+            if path == "/api/listen/status":
+                return self._json(dict(LISTEN.status(), on=WATERFALL.enabled))
+            if path == "/api/ft8":
+                return self._json(FT8.status())
+            if path == "/api/ft8/heard":   # the stations WSJT-X has heard in the last 15 minutes, for the map
+                return self._json(ft8_heard(why=query.get("why", ["0"])[0] == "1"))
+            if path == "/api/waterfall":
+                if not WATERFALL.enabled:
+                    return self._json({"on": False})
+                arg = lambda key, default: query.get(key, [default])[0]
+                out = WATERFALL.view(_int(arg("since", "0")) or 0, float(arg("lo", "0")), float(arg("hi", "0")),
+                                     _int(arg("n", "1000")) or 1000, _int(arg("limit", "40")) or 40)
+                out.update(on=True, status=WATERFALL.status(), radio=waterfall_radio())
+                return self._json(out)
+            if path == "/api/waterfall/info":
+                return self._json(waterfall_info())
             if path == "/checklist":
                 return self._static("checklist.html")
             if path == "/api/checklist":
@@ -872,6 +1194,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(LOG.recent(_int(query.get("limit", ["12"])[0]) or 12))
             if path == "/api/log/stats":
                 return self._json(LOG.stats())
+            if path == "/api/log/stations":
+                return self._json({"stations": LOG.stations()})
+            if path == "/api/log/station":
+                call = str(query.get("call", [""])[0] or "").strip().upper()
+                if not valid_call(call):
+                    return self._json({"error": "That doesn't look like a callsign."}, 400)
+                return self._json({"call": call, "contacts": LOG.contacts_with(call)})
             if path == "/api/log/zones":
                 return self._json({"zones": LOG.zones(), "home": home_zones()[0]})
             if path == "/api/stats":
@@ -898,8 +1227,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._host_ok():
             return self._json({"error": "forbidden"}, 403)
-        origin = self.headers.get("Origin")
-        if origin and origin.lower() not in ORIGINS:
+        origin = (self.headers.get("Origin") or "").lower()
+        if origin and origin not in ORIGINS and not (origin.startswith("http://") and LOOPBACK_HOST.match(origin[7:])):
             return self._json({"error": "forbidden"}, 403)
         if not (self.headers.get("Content-Type") or "").startswith("application/json"):
             return self._json({"error": "send JSON"}, 415)
@@ -919,12 +1248,33 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/log/delete":
                 LOG.delete(_int(body.get("id")) or 0)
                 return self._json({"ok": True})
+            if path == "/api/log/note":
+                notes = body.get("notes")
+                if notes is not None and not isinstance(notes, str):
+                    raise ValueError("A note is text.")
+                contact = LOG.set_note(_int(body.get("id")) or 0, notes)
+                if not contact:
+                    return self._json({"error": "That contact isn't in the log any more."}, 404)
+                return self._json({"ok": True, "contact": contact})
             if path == "/api/rig/tune":
-                return self._json(RADIOS.tune(body.get("freq_hz"), body.get("mode") or None))
+                return self._json(RADIOS.tune(body.get("freq_hz"), body.get("mode") or None, _int(body.get("split_tx_hz")),
+                                              radio=body.get("radio") or None, keep_split=body.get("keep_split") is True))
+            if path == "/api/rig/split":
+                return self._json(RADIOS.set_split(_int(body.get("tx_hz")), _int(body.get("step_hz")), body.get("off") is True))
             if path == "/api/rig/pick":
                 return self._json({"ok": RADIOS.pick(str(body.get("radio") or ""))})
+            if path == "/api/listen/tune":   # what someone listening hears; it never touches the radio
+                follow = body.get("follow") is True
+                lst = LISTEN.tune(body.get("id"), follow, None if follow else _int(body.get("freq_hz")) or 0,
+                                  body.get("mode") or None, _int(body.get("fine_hz")) or 0)
+                if lst is None:
+                    return self._json({"error": "That listener has gone (the page reconnects by itself)."}, 404)
+                return self._json({"ok": True, "follow": lst.follow, "freq_hz": lst.freq_hz, "mode": lst.kind,
+                                   "fine_hz": lst.fine_hz})
             if path == "/api/open":
                 return self._json(open_link(body))
+            if path == "/api/ft8/show":   # the waterfall's FT8 button: opens WSJT-X, or brings it to the front
+                return self._json(FT8.show())
             if path == "/api/checklist":
                 return self._json({"ok": True, "response": CHECKLIST.answer(body), "summary": CHECKLIST.summary()})
             return self._json({"error": "not found"}, 404)
@@ -969,7 +1319,10 @@ def main():
     if OPENINGS:
         OPENINGS.start()
     CANADA.start()
-    SCALE.start()
+    WATERFALL.start()
+    FT8.start()
+    if FT8_HEARD:
+        FT8_HEARD.start()
     if CLUSTER:
         CLUSTER.start()
     say("Station app %s for %s on http://127.0.0.1:%d (country file %s, callbook %s, location %s)" % (

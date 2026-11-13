@@ -64,7 +64,15 @@ SECTIONS = [
         {"id": "tune", "title": "Tune to a spot",
          "where": "The “Tune to …” button on the station card.",
          "try": "Click a spot under On the air, then press “Tune to”. The radio should jump to that "
-                "frequency. It only tunes the radio; it never transmits."},
+                "frequency and sideband. It only tunes the radio; it never transmits."},
+        {"id": "split", "title": "Working split",
+         "where": "Spots marked UP or DN, the station card, and the radio box.",
+         "try": "When a DX station is listening somewhere else (the spot says UP 5, say), its spot is marked UP5 by "
+                "the country. Click it: the card says where they're listening. Press “Tune to” and the radio listens "
+                "on the DX station and transmits where they're listening, and the radio box shows SPLIT and where "
+                "you transmit. On the card, −1 kHz and +1 kHz move your transmit frequency, and Split off ends it. "
+                "Tuning to a station that isn't working split turns split off. It never transmits.",
+         "added": "0.13.2"},
         {"id": "two_radios", "title": "Two radios",
          "where": "The radio's name in the radio box.",
          "try": "With both radios on, the name gets arrows (⇄): click it to show the other radio. Turn either "
@@ -76,24 +84,34 @@ SECTIONS = [
         {"id": "spots", "title": "On the air",
          "where": "The On the air tab, on the right.",
          "try": "Pick a band with the number buttons (only the bands you have antennas for). Voice only hides the "
-                "CW and digital parts of each band. Click a spot to look it up."},
+                "CW and digital parts of each band. Click a spot to look it up. New: each spot shows the sideband "
+                "the station is on (USB or LSB) beside its frequency, and you can point at a blue spot on the map "
+                "to see who it is and where they are on the dial, and click it to look them up.",
+         "added": "0.13.1"},
         {"id": "badges", "title": "New-one badges",
          "where": "In the On the air list.",
          "try": "NEW means a country that isn't in your log yet, ZONE a new CQ zone, and BAND a country you've "
                 "worked, but not on that band. New countries also get an amber ring on the maps."},
-        {"id": "log", "title": "Log a contact",
+        {"id": "log", "title": "Log a contact", "added": "0.15.0",
          "where": "The “Log this contact” button on the station card.",
          "try": "Look up the station, check the band beside the button (pick the band for a radio the display "
-                "doesn't follow, such as a 2 m rig), then press "
-                "Log this contact. Made a slip? Press Undo on the message that pops up."},
+                "doesn't follow, such as a 2 m rig), then press Log this contact. The button turns green and "
+                "says Logged, and My log gets a green dot. Pressing it again for the same station within "
+                "15 minutes asks first. Made a slip? Press Undo on the message that pops up."},
         {"id": "mylog", "title": "My log",
          "where": "The My log tab, beside On the air.",
          "try": "Your latest contacts. “Save the log as ADIF” at the bottom saves a copy you can send "
                 "to Logbook of the World or QRZ."},
         {"id": "stats", "title": "Stats",
          "where": "The Stats button at the top.",
-         "try": "Your contacts, countries (toward DXCC's 100), CQ zones and continents, with charts. The "
-                "Countries tab lists every country, filled in when it's in your log. Point at a bar for its numbers."},
+         "try": "Your contacts, countries (toward DXCC's 100), CQ zones and continents, with charts, the "
+                "stations you talk to most, and contacts made on today's date in past years. The Countries tab "
+                "lists every country, filled in when it's in your log. Point at a bar for its numbers."},
+        {"id": "stations", "title": "Stations and notes", "added": "0.15.0",
+         "where": "The Stations tab in Stats, or History and notes on a station's card.",
+         "try": "Everyone you've talked to: when you first and last talked, and how many times. Pick one to see "
+                "every contact, and add a note about what you talked about. Add a note also shows on the "
+                "message right after you log a contact."},
     ]),
     ("Around the screen", [
         {"id": "conditions", "title": "Band conditions",
@@ -113,7 +131,9 @@ SECTIONS = [
         {"id": "openings", "title": "Band openings",
          "where": "The Who can hear you tile at the bottom.",
          "try": "Click a band to see, as green dots on the map, where stations near you are being heard right "
-                "now. It's a quick way to see which bands are open, and to where."},
+                "now. It's a quick way to see which bands are open, and to where. New: point at a green dot to "
+                "see who it is and which station near you they heard, and click it to look them up.",
+         "added": "0.13.0"},
         {"id": "listen", "title": "Listen to yourself",
          "where": "“Listen to yourself” on the Who can hear you tile.",
          "try": "It opens a receiver far away, already tuned to your frequency. Say your call and listen for "
@@ -139,10 +159,29 @@ SECTIONS = [
          "where": "The big screen.",
          "try": "Press Alt+F4 on the display: it comes back by itself after about 5 seconds. To close it for a "
                 "while, use Menu > Close station display, and Menu > Station display brings it back."},
-        {"id": "waterfall", "title": "Waterfall",
+        # A new id: answers about the Gqrx waterfall (before 0.14) don't carry over to this one.
+        {"id": "waterfall2", "title": "Waterfall", "added": "0.14.0",
          "where": "The computer's own screen.",
-         "try": "Stations show as stripes that slide sideways as you turn {the_radio}'s dial.",
-         "when": "Once the waterfall's receiver hears {the_radio}"},
+         "try": "It's centred on {the_radio}'s dial: turn the dial and the picture slides with it, and band and "
+                "sideband changes follow by themselves. Click a signal, or a DX spot's callsign on one, to tune "
+                "there. The buttons at the top show 20 kHz up to the whole band. (When {the_radio} transmits, "
+                "its lines show red, marked TX. A green Remote listener sign at the top means someone is listening "
+                "from another computer; it only listens.)"},
+        {"id": "ft8", "title": "FT8 with WSJT-X", "added": "0.15.3",
+         "where": "The FT8 button at the top of the waterfall, or Menu > WSJT-X (FT8), on the computer's own screen.",
+         "try": "Tune {the_radio} to an FT8 frequency (20 m: 14.074 USB) and wait: every 15 seconds WSJT-X lists "
+                "the stations it heard in Band Activity, with their signal strength (and where they are, for "
+                "stations calling CQ). Picking a band in WSJT-X tunes {the_radio} there too. For now it only "
+                "listens: {the_radio} won't transmit from WSJT-X. Pressed again, the FT8 button puts WSJT-X away "
+                "(it keeps listening), and once more brings it back. The stations it hears also show on the "
+                "station display's map as small violet dots."},
+        {"id": "beside", "title": "Windows beside the waterfall", "added": "0.15.8",
+         "where": "The computer's own screen.",
+         "try": "Open something: a favourite, a look-up's web page, or WSJT-X with the FT8 button. It opens on the "
+                "right, and the waterfall moves over to make room, still whole. Close it (or minimize it, or press "
+                "FT8 again for WSJT-X) and the waterfall takes the whole screen again. Something that opens on the "
+                "big screen comes over here too, so the station display stays clear. Moved or resized by hand, a "
+                "window stays where you put it."},
     ]),
 ]
 

@@ -1,68 +1,75 @@
 #!/usr/bin/env bash
-# Keeps the SDR waterfall (Gqrx) open on the computer's own screen, beside the station display.
+# Keeps the waterfall open on the computer's own screen, beside the station display.
 #
-# Started by station-waterfall.service. If Gqrx is closed or stops, systemd starts this again
-# a few seconds later, so the waterfall comes back by itself.
-#   Turn it off:  systemctl --user disable --now station-waterfall
-#   Turn it on:   systemctl --user enable --now station-waterfall
-#   Or set "start = no" under [waterfall] in ~/station/config.ini.
+# The station app runs the SDR itself (through rtl_tcp) and serves the waterfall page at
+# http://127.0.0.1:8073/waterfall; this opens that page in its own window on the other screen,
+# filling it with the taskbar still showing.
 #
-# Each time, Gqrx starts in a known state: on the radio's IF (if_hz; the FT-950's is 69.450 MHz), with its own
-# sound off (the radio does the listening) and its remote control on, so the station app can
-# keep the waterfall's scale on the radio's frequency.
+# Started by station-waterfall.service. If the window is closed or Chromium stops, systemd starts
+# this again a few seconds later, so the waterfall comes back by itself.
+#   Close the window until it's turned on again:  systemctl --user disable --now station-waterfall
+#   Turn it on again:                              systemctl --user enable --now station-waterfall
+#   The receiver itself runs in the station app: "start = no" under [waterfall] in ~/station/config.ini
+#   (then restart the app) turns off both.
+#   Its messages: journalctl --user -u station-waterfall -n 30 (the receiver's are in the app's)
 set -u
 
 STATION="${STATION_DIR:-$HOME/station}"
-APP="$STATION/app"
-CONF_DIR="${GQRX_CONF_DIR:-$HOME/.config/gqrx}"
-CONF="$CONF_DIR/station.conf"
+PROFILE="${STATION_WF_PROFILE:-$HOME/.config/station-waterfall}"
 POLL="${STATION_WF_POLL:-5}"
 HUD_WAIT="${STATION_WF_HUD_WAIT:-120}"
-LOG="$STATION/data/gqrx.log"
 export DISPLAY="${DISPLAY:-:0}"
 [ -n "${XAUTHORITY:-}" ] || export XAUTHORITY="$HOME/.Xauthority"
 
 say() { echo "waterfall: $*"; }
 
-setting() {  # setting KEY DEFAULT: a value from [waterfall] in config.ini
-  python3 - "$STATION/config.ini" "$1" "$2" <<'PY'
+setting() {  # setting SECTION KEY DEFAULT: a value from config.ini
+  python3 - "$STATION/config.ini" "$1" "$2" "$3" <<'PY'
 import configparser, sys
 cp = configparser.ConfigParser(inline_comment_prefixes=(" #", " ;"), interpolation=None)
 cp.read(sys.argv[1], encoding="utf-8")
-print(cp.get("waterfall", sys.argv[2], fallback="").strip() or sys.argv[3])
+print(cp.get(sys.argv[2], sys.argv[3], fallback="").strip() or sys.argv[4])
 PY
 }
 
-case "$(setting start no | tr '[:upper:]' '[:lower:]')" in
+case "$(setting waterfall start no | tr '[:upper:]' '[:lower:]')" in
   no|off|false|0) say "switched off in config.ini ([waterfall] start = no)"; exit 3 ;;
 esac
-IF_HZ="$(setting if_hz 69450000)"
-RC_PORT="$(setting remote_port 7356)"
+PORT="${STATION_PORT:-$(setting display port 8073)}"
+URL="http://127.0.0.1:$PORT/waterfall"
+BROWSER="$(command -v chromium || command -v chromium-browser || true)"
+if [ -z "$BROWSER" ]; then
+  say "Chromium isn't installed; run the station installer again"
+  exit 3
+fi
 
-# 1. Wait for the desktop.
+# 1. Wait for the desktop, and its window manager, so the window can be put on the right screen.
 told=0
 until xrandr --query >/dev/null 2>&1; do
   [ "$told" -eq 1 ] || say "waiting for the desktop"; told=1
   sleep "$POLL"
 done
+if command -v wmctrl >/dev/null 2>&1; then
+  for _ in $(seq 1 24); do
+    wmctrl -m >/dev/null 2>&1 && break
+    sleep "$POLL"
+  done
+fi
 
-# 2. Wait for the NooElec. Gqrx shows error boxes if it starts without it.
-nooelec() { lsusb -d 0bda:2838 >/dev/null 2>&1 || lsusb -d 0bda:2832 >/dev/null 2>&1; }
+# 2. Only one waterfall window: if one was opened some other way, wait for it to close.
 told=0
-until nooelec; do
-  [ "$told" -eq 1 ] || say "waiting for the NooElec to be plugged in"; told=1
-  sleep $((POLL * 6))
+while pgrep -u "$(id -u)" -f -- "--user-data-dir=$PROFILE( |$)" >/dev/null 2>&1; do
+  [ "$told" -eq 1 ] || say "the waterfall is already open; this takes over when that window closes"; told=1
+  sleep "$POLL"
 done
 
-# Two copies of Gqrx can't share the NooElec, so if one was opened from the menu, wait for it.
-# (When this service restarts, systemd has already closed the Gqrx it started.)
-told=0
-while pgrep -x gqrx >/dev/null 2>&1; do
-  [ "$told" -eq 1 ] || say "Gqrx is already open (from the menu?); the waterfall starts when it's closed"; told=1
-  sleep $((POLL * 6))
+# 3. Give the station app up to a minute to start answering.
+for _ in $(seq 1 60); do
+  curl -fs -o /dev/null "http://127.0.0.1:$PORT/api/health" && break
+  sleep 1
 done
 
-# 3. Find the screen beside the station display.
+# 4. Find the screen beside the station display.
 screens() {  # one line per connected screen: NAME WxH+X+Y
   xrandr --query 2>/dev/null | awk '$2 == "connected" {
     for (i = 3; i <= NF; i++) if ($i ~ /^[0-9]+x[0-9]+[+][0-9]+[+][0-9]+$/) { print $1, $i; break } }'
@@ -105,42 +112,52 @@ while [ -z "$target" ]; do
   sleep 60
   target="$(pick_screen "$(hud_spot)")"
 done
+IFS='x+' read -r w h x y <<<"$target"
 
-# 4. Start Gqrx in a known state.
-mkdir -p "$CONF_DIR" "$STATION/data"
-[ -f "$CONF" ] || cp "$APP/share/gqrx-station.conf" "$CONF"
-python3 "$APP/bin/gqrx-conf.py" "$CONF" General/crashed=false "input/frequency=$IF_HZ" input/lnb_lo= \
-  receiver/offset=0 "receiver/demod=Demod Off" remote_control/enabled=true "remote_control/port=$RC_PORT"
-
-gqrx -c station.conf >"$LOG" 2>&1 &
+# 5. Open the page in its own window there. After a power cut Chromium offers to "restore pages":
+#    mark the last exit as normal instead.
+PREFS="$PROFILE/Default/Preferences"
+if [ -f "$PREFS" ]; then
+  sed -i 's/"exited_cleanly":false/"exited_cleanly":true/; s/"exit_type":"[^"]*"/"exit_type":"Normal"/' "$PREFS"
+fi
+say "opening the waterfall (screen $target)"
+"$BROWSER" --app="$URL" --user-data-dir="$PROFILE" \
+  --window-position="$((x + 40)),$((y + 40))" --window-size="$((w * 3 / 4)),$((h * 3 / 4))" \
+  --password-store=basic --no-first-run --noerrdialogs --disable-infobars \
+  --disable-session-crashed-bubble --disable-features=Translate \
+  --check-for-update-interval=31536000 >/dev/null 2>&1 &
 pid=$!
-say "Gqrx started (screen $target)"
 
-# 5. Put its window on that screen, filling it (the taskbar stays visible).
+# 6. Fill that screen (the taskbar stays visible). Chromium may put the window back where it was
+#    last time, so it's moved onto this screen first.
+find_window() {  # the waterfall's window: one that belongs to its own Chromium (found by its profile)
+  local pids
+  pids="$(pgrep -u "$(id -u)" -f -- "--user-data-dir=$PROFILE( |$)" | tr '\n' ' ')"
+  [ -n "$pids" ] || return 0
+  wmctrl -lp 2>/dev/null | awk -v pids="$pids" '
+    BEGIN { n = split(pids, p, " "); for (i = 1; i <= n; i++) mine[p[i]] = 1 }
+    ($3 in mine) {   # wmctrl -lp: id, desktop, pid, host, title
+      title = $0; sub(/^[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ /, "", title)
+      if (title ~ /^Waterfall/) { print $1; found = 1; exit }
+      if (first == "") first = $1
+    }
+    END { if (!found && first != "") print first }'
+}
 win=""
 for _ in $(seq 1 30); do
-  win="$(wmctrl -l 2>/dev/null | awk '$4 ~ /^Gqrx/ { print $1; exit }')"
+  win="$(find_window)"
   [ -n "$win" ] && break
   kill -0 "$pid" 2>/dev/null || break
   sleep 1
 done
 if [ -n "$win" ]; then
-  IFS='x+' read -r w h x y <<<"$target"
   wmctrl -i -r "$win" -b remove,maximized_vert,maximized_horz,fullscreen
   wmctrl -i -r "$win" -e "0,$((x + 40)),$((y + 40)),$((w * 3 / 4)),$((h * 3 / 4))"
   sleep 0.5
   wmctrl -i -r "$win" -b add,maximized_vert,maximized_horz
 else
-  say "couldn't find Gqrx's window to place it"
+  say "couldn't find the waterfall's window to fill the screen"
 fi
 
-# 6. Start receiving (Gqrx always opens stopped).
-for _ in $(seq 1 15); do
-  reply="$(python3 "$APP/station/waterfall.py" send "U DSP 1" "$RC_PORT" 2>/dev/null)"
-  case "$reply" in RPRT\ 0*) say "receiving"; break ;; esac
-  kill -0 "$pid" 2>/dev/null || break
-  sleep 1
-done
-
 wait "$pid"
-say "Gqrx closed (status $?); it opens again in a few seconds"
+say "closed (status $?); it opens again in a few seconds"
