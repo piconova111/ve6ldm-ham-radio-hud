@@ -1,0 +1,15 @@
+[Unit]
+Description=Window layout (the waterfall, and what opens beside it, on the computer's own screen)
+After=station-waterfall.service
+
+[Service]
+ExecStart=/usr/bin/python3 %h/station/app/bin/windows.py keep
+Environment=DISPLAY=:0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+Restart=always
+RestartSec=5
+# Exit status 3: switched off in config.ini ([layout] keep = no), or python3-xlib isn't installed; don't keep trying.
+RestartPreventExitStatus=3
+
+[Install]
+WantedBy=default.target

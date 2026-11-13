@@ -195,11 +195,57 @@ class Logbook:
         return [dict(r) for r in rows]
 
     def history(self, call):
+        """How many contacts with a station, and the first and the last."""
         with self._db() as db:
             count = db.execute("SELECT COUNT(*) FROM qso WHERE call = ?", (call,)).fetchone()[0]
-            last = db.execute("SELECT time_on, band, mode, submode FROM qso WHERE call = ? "
+            last = db.execute("SELECT id, time_on, band, mode, submode FROM qso WHERE call = ? "
                               "ORDER BY time_on DESC, id DESC LIMIT 1", (call,)).fetchone()
-        return {"count": count, "last": dict(last) if last else None}
+            first = db.execute("SELECT id, time_on, band, mode, submode FROM qso WHERE call = ? "
+                               "ORDER BY time_on, id LIMIT 1", (call,)).fetchone()
+        return {"count": count, "last": dict(last) if last else None, "first": dict(first) if first else None}
+
+    def stations(self):
+        """Every station in the log, once each: first and last contact, how many, the bands and modes,
+        and the latest name, place, country and grid logged for them. Latest contact first."""
+        with self._db() as db:
+            rows = db.execute("SELECT call, time_on, band, mode, submode, name, qth, grid, country, "
+                              "distance_km, notes FROM qso ORDER BY time_on, id").fetchall()
+        order = {name: i for i, (_, _, name) in enumerate(BANDS)}
+        out = {}
+        for r in rows:
+            st = out.get(r["call"])
+            if st is None:
+                st = out[r["call"]] = {"call": r["call"], "first": r["time_on"], "count": 0, "bands": [],
+                                       "modes": [], "notes": 0}
+            st["last"] = r["time_on"]
+            st["count"] += 1
+            mode = r["submode"] if r["mode"] == "SSB" and r["submode"] else r["mode"]
+            if r["band"] and r["band"] not in st["bands"]:
+                st["bands"].append(r["band"])
+            if mode and mode not in st["modes"]:
+                st["modes"].append(mode)
+            for key in ("name", "qth", "grid", "country", "distance_km"):
+                if r[key] not in (None, ""):
+                    st[key] = r[key]   # the latest one logged
+            if r["notes"]:
+                st["notes"] += 1
+        for st in out.values():
+            st["bands"].sort(key=lambda b: order.get(b, 99))
+        return sorted(out.values(), key=lambda st: st["last"], reverse=True)
+
+    def contacts_with(self, call):
+        """Every contact with one station, latest first."""
+        with self._db() as db:
+            rows = db.execute("SELECT id, call, time_on, freq_hz, band, mode, submode, rst_sent, rst_rcvd, name, qth, "
+                              "grid, country, notes, tx_pwr, my_rig, distance_km FROM qso WHERE call = ? "
+                              "ORDER BY time_on DESC, id DESC", (call,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def set_note(self, qso_id, text):
+        """Saves (or with an empty text, clears) a contact's note. Returns the contact, or None if it's gone."""
+        with self._db() as db:
+            db.execute("UPDATE qso SET notes = ? WHERE id = ?", (_clean(text, 500), int(qso_id)))
+        return self.get(qso_id)
 
     def has_country(self, country):
         if not country:
@@ -315,5 +361,6 @@ class Logbook:
                 + field("DISTANCE", "%d" % round(r["distance_km"]) if r["distance_km"] else "")
                 + field("TX_PWR", "%g" % round(r["tx_pwr"]) if r["tx_pwr"] else "")
                 + field("MY_RIG", r["my_rig"])
-                + field("COMMENT", r["notes"]) + field("STATION_CALLSIGN", station_call) + "<EOR>\n")
+                + field("COMMENT", " ".join(r["notes"].split()) if r["notes"] else None)   # one line in ADIF
+                + field("STATION_CALLSIGN", station_call) + "<EOR>\n")
         return "".join(out)

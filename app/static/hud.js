@@ -25,7 +25,7 @@ const state = {
   band: '20m', bandChosen: false, voice: true, tab: 'spots', heardTop: null,
   iss: null, issOpen: false, issAlerted: new Set(), favLoaded: false,
   sats: null, satId: null, satDetail: null, satTimer: null,   // the satellite card
-  openings: null, openBand: null, openTimer: null, heard: [], radio: null, listen: null,
+  openings: null, openBand: null, openTimer: null, heard: [], radio: null, listen: null, ft8: null,
   mapView: 'flat',   // the map picked; a look-up shows the globe for a while if the flat map is showing
 };
 const VIEWS_MAP = ['flat', 'globe', 'beam'];
@@ -145,6 +145,28 @@ function drawStation() {
 }
 
 /* ---------- Map views: flat map, globe, beam map (drawn by maps.js) ---------- */
+// The legend over the map: when it's longer than the map is wide (a new-country spot, the path to a long call,
+// the stations WSJT-X hears), the sun and night-side entries give way first, rather than being cut off.
+const LEGEND_SPARE = ['legend-sun', 'legend-night'];
+function fitLegend() {
+  const box = document.querySelector('.legend');
+  if (!box) return;
+  for (const id of LEGEND_SPARE) $(id).classList.remove('squeezed');
+  for (const id of LEGEND_SPARE) {
+    if (box.scrollWidth <= box.clientWidth + 1) break;
+    $(id).classList.add('squeezed');
+  }
+}
+function watchLegend() {
+  const box = document.querySelector('.legend');
+  if (!box) return;
+  // its entries showing, hiding or changing words (not the class fitLegend sets), and its own width changing
+  new MutationObserver(fitLegend).observe(box, { subtree: true, childList: true, characterData: true, attributes: true,
+                                                attributeFilter: ['hidden'] });
+  if (window.ResizeObserver) new ResizeObserver(fitLegend).observe(box);
+  fitLegend();
+}
+
 function showMapView(view) {
   if (!Maps.available()) return;
   Maps.setView(view);
@@ -265,13 +287,44 @@ function showView(id) {
 const fmtNum = (n) => Math.round(n).toLocaleString('en-CA');
 const bandLabel = (b) => (b ? b.replace(/(\d)(c?m)$/, '$1 $2') : '');
 
+// Dates the way people say them: "today at 1:42 p.m.", "yesterday", or "Oct 14, 2026" (in the station's time zone).
+function dayKey(when) { return timeIn(localTz(), { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-CA', when); }
+function clockText(iso) { return timeIn(localTz(), { hour: 'numeric', minute: '2-digit' }, 'en-CA', new Date(iso)); }
+function dayText(iso, withTime = false) {
+  const when = new Date(iso), key = dayKey(when);
+  const day = key === dayKey(new Date()) ? 'today' : key === dayKey(new Date(Date.now() - 864e5)) ? 'yesterday'
+    : timeIn(localTz(), { month: 'short', day: 'numeric', year: 'numeric' }, 'en-CA', when);
+  return withTime || day === 'today' ? `${day} at ${clockText(iso)}` : day;
+}
+// Whole calendar days, months and years between two times, by the station's own dates.
+function calendarSpan(fromIso, toIso = new Date().toISOString()) {
+  const a = dayKey(new Date(fromIso)), b = dayKey(new Date(toIso));   // "2026-11-09"
+  const y = (k) => Number(k.slice(0, 4)), m = (k) => Number(k.slice(5, 7)), d = (k) => Number(k.slice(8, 10));
+  const days = Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+  const months = (y(b) - y(a)) * 12 + m(b) - m(a) - (d(b) < d(a) ? 1 : 0);
+  return { days, months, years: Math.floor(months / 12) };
+}
+// How long ago a contact was, roughly: "3 weeks ago", "2 years ago".
+function sinceText(iso) {
+  const { days, months, years } = calendarSpan(iso);
+  if (days < 1) return 'today';
+  if (days < 2) return 'yesterday';
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.round(days / 7)} weeks ago`;
+  if (years < 2) return `${plural(Math.max(2, months), 'month', 'months')} ago`;
+  return `${plural(years, 'year', 'years')} ago`;
+}
+const sentence = (text) => (/[.!?]$/.test(text) ? text : `${text}.`);   // "at 1:42 p.m." ends one already
+const qsoMode = (q) => q.submode || q.mode || '';
+const qsoWhat = (q) => [bandLabel(q.band), qsoMode(q)].filter(Boolean).join(' ');
+
 function historyText(card) {
   const h = card.history || { count: 0 };
   if (!h.count || !h.last) return `No contacts with ${card.call} in your log yet.`;
-  const date = timeIn(localTz(), { month: 'short', day: 'numeric', year: 'numeric' }, 'en-CA', new Date(h.last.time_on));
-  const what = [bandLabel(h.last.band), h.last.mode].filter(Boolean).join(' ');
-  const times = h.count === 1 ? 'once' : `${h.count} times`;
-  return `In your log ${times}. Last on ${date}${what ? ', ' + what : ''}.`;
+  const last = h.last, first = h.first || h.last;
+  const bit = (q) => `${dayText(q.time_on)}${qsoWhat(q) ? ` (${qsoWhat(q)})` : ''}`;
+  if (h.count === 1) return sentence(`In your log once: ${bit(last)}`);
+  return sentence(`In your log ${h.count} times. First ${bit(first)}, last ${bit(last)}`);
 }
 
 function turnNeedle(id, key, bearing) {
@@ -308,7 +361,8 @@ function renderFound(card, spot) {
   setLogBand(defaultLogBand(card.spot));
   const tune = $('btn-tune');
   tune.hidden = !spot || !state.radioOk;
-  if (spot) tune.textContent = `Tune to ${spot.freq_khz.toFixed(1).replace(/\.0$/, '')}`;
+  if (spot) tune.textContent = `Tune to ${spot.freq_khz.toFixed(1).replace(/\.0$/, '')} ${spotSideband(spot)}`;
+  renderSplit();
   $('c-call').textContent = card.call;
   const where = [card.qth, card.region, card.country].filter((s, i, all) => s && all.indexOf(s) === i);
   $('c-country').textContent = where.join(', ');
@@ -333,6 +387,9 @@ function renderFound(card, spot) {
     $('c-day').textContent = '';
   }
   $('c-history').textContent = historyText(card);
+  $('c-history-btn').hidden = !(card.history && card.history.count);
+  setLogButton(null);
+  state.logConfirm = null;
   renderLookups('c-links', card.call, card.lookups);
   const note = $('c-note');
   note.hidden = card.precise;
@@ -387,40 +444,77 @@ async function lookUp(raw, spot) {
 }
 
 /* ---------- Logging ---------- */
-function showToast(text, undoId, alert = false) {
+function showToast(text, undoId, alert = false, noteFor = null) {
   $('toast').classList.toggle('alert', alert === true);
   $('toast').classList.toggle('celebrate', alert === 'celebrate');
   $('toast-text').textContent = text;
   $('toast-undo').hidden = !undoId;
+  $('toast-note').hidden = !noteFor;
   state.undoId = undoId || null;
+  state.noteFor = noteFor;
   $('toast').hidden = false;
   clearTimeout(state.toastTimer);
-  state.toastTimer = setTimeout(() => { $('toast').hidden = true; state.undoId = null; }, alert ? 25000 : 12000);
+  state.toastTimer = setTimeout(() => { $('toast').hidden = true; state.undoId = null; state.noteFor = null; }, alert ? 25000 : 15000);
+}
+
+// The log button says what happened: green "Logged", amber "Log it again?", red "Didn't save".
+function setLogButton(kind, text, ms) {
+  const b = $('btn-log');
+  clearTimeout(state.logBtnTimer);
+  b.classList.remove('logged', 'confirm', 'failed');
+  void b.offsetWidth;   // so the blink starts again
+  if (kind) b.classList.add(kind);
+  b.textContent = text || 'Log this contact';
+  if (ms) state.logBtnTimer = setTimeout(() => setLogButton(null), ms);
+}
+
+// The My log tab blinks and keeps a green dot until it's opened, so it's clear where the contact went.
+function flashLogTab() {
+  const tab = $('tab-log');
+  tab.classList.remove('flash');
+  void tab.offsetWidth;
+  tab.classList.add('flash', 'has-new');
 }
 
 async function logContact() {
   const card = state.card;
   if (!card) return;
   const button = $('btn-log');
+  // Logged a moment ago? A second press is needed, so a double press doesn't log it twice.
+  const last = card.history && card.history.last;
+  const again = state.logConfirm && state.logConfirm.call === card.call && Date.now() < state.logConfirm.until;
+  if (last && Date.now() - new Date(last.time_on) < 15 * 60000 && !again) {
+    state.logConfirm = { call: card.call, until: Date.now() + 10000 };
+    setLogButton('confirm', 'Log it again?', 10000);
+    showToast(`${card.call} is already in your log from ${clockText(last.time_on)}: press "Log it again?" to add another contact.`);
+    return;
+  }
+  state.logConfirm = null;
   button.disabled = true;
   try {
     const q = await api.post('/api/log', {
       call: card.call, name: card.name, qth: card.qth, grid: card.grid, distance_km: card.distance_km,
       country: card.country, cq: card.cq, itu: card.itu,
       spot_freq_hz: card.spot ? Math.round(card.spot.freq_khz * 1000) : null,
-      mode: card.spot ? (card.spot.freq_khz < 10000 ? 'LSB' : 'USB') : null,
+      mode: card.spot ? spotSideband(card.spot) : null,
       band: $('log-band').value,
     });
     try { localStorage.setItem('logBand', $('log-band').value); } catch (err) { /* only a convenience */ }
     const at = timeIn(localTz(), { hour: 'numeric', minute: '2-digit' }, 'en-CA', new Date(q.time_on));
-    const what = [bandLabel(q.band), q.mode].filter(Boolean).join(' ');
+    const what = qsoWhat(q);
     const party = celebration(q);
-    if (party) showToast(party, q.id, 'celebrate');
-    else showToast(what ? `Logged ${q.call} at ${at} on ${what}.` : `Logged ${q.call} at ${at}`, q.id);
-    card.history = { count: ((card.history && card.history.count) || 0) + 1, last: q };
+    if (party) showToast(party, q.id, 'celebrate', q);
+    else showToast(`${sentence(what ? `Logged ${q.call} at ${at} on ${what}` : `Logged ${q.call} at ${at}`)} It's in My log and your stats.`, q.id, false, q);
+    setLogButton('logged', `✓ Logged ${at}`, 8000);
+    flashLogTab();
+    state.justLogged = q.id;
+    const before = card.history || {};
+    card.history = { count: (before.count || 0) + 1, last: q, first: before.first || q };
     $('c-history').textContent = historyText(card);
+    $('c-history-btn').hidden = false;
     refreshLog();
   } catch (err) {
+    setLogButton('failed', 'Didn’t save: try again', 10000);
     showToast('That contact didn’t save. Try again in a moment.');
   } finally {
     button.disabled = false;
@@ -438,8 +532,19 @@ async function undoLog() {
   }
   $('toast').hidden = true;
   state.undoId = null;
+  state.noteFor = null;
+  state.justLogged = null;
+  setLogButton(null);
   refreshLog();
   if (state.card) lookUp(state.card.call);
+}
+
+function addNoteFromToast() {
+  const q = state.noteFor;
+  if (!q) return;
+  $('toast').hidden = true;
+  state.noteFor = null;
+  openStats('stations', { call: q.call, note: q.id });
 }
 
 function cell(className, text) {
@@ -463,7 +568,7 @@ function renderRecent(rows) {
       : timeIn(localTz(), { month: 'short', day: 'numeric' }, 'en-CA', when);
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'row qso';
+    button.className = 'row qso' + (q.id === state.justLogged ? ' just-logged' : '');
     button.append(
       cell('r-when', label),
       cell('r-call', q.call),
@@ -631,7 +736,7 @@ function renderZoneDetail(n, home) {
 /* ---------- Stats: the log in numbers (Overview, Countries, CQ zones) ---------- */
 const CONTINENTS = ['NA', 'SA', 'EU', 'AF', 'AS', 'OC'];
 const CONT_NAMES = { NA: 'North America', SA: 'South America', EU: 'Europe', AF: 'Africa', AS: 'Asia', OC: 'Oceania' };
-const STATS_TABS = ['overview', 'countries', 'zones'];
+const STATS_TABS = ['overview', 'stations', 'countries', 'zones'];
 const plural = (n, one, many) => `${fmtNum(n)} ${n === 1 ? one : many}`;
 
 function el(tag, className, text) {
@@ -673,6 +778,7 @@ function showStatsTab(tab, zone) {
   }
   hideTip();
   if (tab === 'overview') loadStats();
+  else if (tab === 'stations') loadStations(zone);
   else if (tab === 'countries') loadCountries();
   else showZonesTab(zone);
 }
@@ -710,6 +816,8 @@ async function loadStats() {
   renderContinents(s.countries.by_continent);
   renderMonths(s.months, s.first);
   renderNewOnes(s.new_ones);
+  renderRegulars(s.stations);
+  renderOnThisDay(s.on_this_day, s.first);
 }
 
 function kpi(label, value, unit, sub, bar, barClass) {
@@ -730,14 +838,18 @@ function renderKpis(s) {
     ? { month: 'short', day: 'numeric' } : { month: 'short', year: 'numeric' }, 'en-CA', first) : '';
   const c = s.countries.worked, z = s.zones.worked, conts = s.continents.worked;
   const missing = CONTINENTS.filter((k) => !conts.includes(k));
-  const top = s.bands.reduce((a, b) => (!a || b.contacts > a.contacts ? b : a), null);
-  const far = s.furthest;
+  const far = s.furthest, st = s.stations || { unique: 0, returning: 0 };
+  const years = s.years || [];
+  const thisYear = years.length ? years[years.length - 1].contacts : 0;
+  const when = years.length > 1 ? `${fmtNum(s.this_month)} this month · ${fmtNum(thisYear)} this year`
+    : `${fmtNum(s.this_month)} this month · since ${since}`;
   $('st-kpis').replaceChildren(
-    kpi('Contacts', fmtNum(s.total), '', s.total ? `${fmtNum(s.this_month)} this month · since ${since}` : 'None logged yet'),
+    kpi('Contacts', fmtNum(s.total), '', s.total ? when : 'None logged yet'),
     kpi('Countries', fmtNum(c), `of ${s.countries.total}`, c >= 100 ? '100 or more: enough for DXCC' : `${100 - c} more for DXCC (100)`, c / 100),
     kpi('CQ zones', String(z), 'of 40', z >= 40 ? 'All 40: enough for WAZ' : `${40 - z} more for WAZ`, z / 40, 'zone'),
     kpi('Continents', String(conts.length), 'of 6', missing.length ? `${missing.length} more for WAC` : 'All six: enough for WAC', conts.length / 6),
-    kpi('Bands', String(s.bands.length), '', top ? `Most contacts on ${bandLabel(top.band)}` : 'None yet'),
+    kpi('Stations', fmtNum(st.unique), '', !st.unique ? 'None yet' : st.returning
+      ? `${fmtNum(st.returning)} of them more than once` : 'Each one once so far'),
     kpi('Furthest contact', far ? fmtNum(far.km) : '–', far ? 'km' : '', far ? `${far.call}${far.country ? ', ' + far.country : ''}` : 'None yet'),
   );
 }
@@ -822,6 +934,217 @@ function renderNewOnes(items) {
       what, el('span', 'new-call', f.call));
     list.append(item);
   }
+}
+
+function renderRegulars(st) {
+  const list = $('st-regulars');
+  list.replaceChildren();
+  const rows = (st && st.regulars) || [];
+  if (!rows.length) { list.append(el('li', 'st-empty', 'Stations you talk to more than once show up here.')); return; }
+  for (const r of rows) {
+    const b = el('button', 'reg-row');
+    b.type = 'button';
+    b.append(el('span', 'reg-call', r.call), el('span', 'reg-who', [r.name, r.country].filter(Boolean).join(' · ')),
+      el('span', 'reg-count', plural(r.count, 'contact', 'contacts')), el('span', 'reg-last', `last ${sinceText(r.last)}`));
+    b.title = `First contact ${dayText(r.first)}, last ${dayText(r.last)}. Click to see them all.`;
+    b.addEventListener('click', () => showStatsTab('stations', { call: r.call }));
+    const item = document.createElement('li');
+    item.append(b);
+    list.append(item);
+  }
+}
+
+function renderOnThisDay(items, first) {
+  const list = $('st-onday');
+  list.replaceChildren();
+  $('st-onday-title').textContent = `On this day: ${timeIn(localTz(), { month: 'long', day: 'numeric' }, 'en-CA')}`;
+  if (!items || !items.length) {
+    const started = first ? ` Your log goes back to ${dayText(first)}.` : '';
+    list.append(el('li', 'st-empty', `Contacts you made on this date in earlier years show up here.${started}`));
+    return;
+  }
+  for (const d of items) {
+    const b = el('button', 'reg-row');
+    b.type = 'button';
+    b.append(el('span', 'reg-call', d.call), el('span', 'reg-who', d.country || ''),
+      el('span', 'reg-count', [bandLabel(d.band), d.mode].filter(Boolean).join(' ')),
+      el('span', 'reg-last', d.years === 1 ? 'a year ago' : `${d.years} years ago`));
+    b.addEventListener('click', () => showStatsTab('stations', { call: d.call }));
+    const item = document.createElement('li');
+    item.append(b);
+    list.append(item);
+  }
+}
+
+/* ---------- Stations: everyone in the log, when they first and last talked, and notes ---------- */
+async function loadStations(pick) {
+  if (pick && pick.call) { state.snPicked = pick.call; state.snNoteFor = pick.note || null; }
+  let data;
+  try { data = await api.get('/api/log/stations'); } catch (err) {
+    if (!state.stations) $('sn-list').replaceChildren(el('li', 'soon', 'Your stations didn’t load. Try again in a moment.'));
+    return;
+  }
+  state.stations = data.stations || [];
+  if (pick && pick.call) $('sn-search').value = '';
+  renderStations();
+  if (state.snPicked && state.stations.some((x) => x.call === state.snPicked)) pickStation(state.snPicked);
+  else { state.snPicked = null; renderStationDetail(); }
+}
+
+const SN_SORTS = {
+  last: (a, b) => (a.last < b.last ? 1 : a.last > b.last ? -1 : 0),
+  first: (a, b) => (a.first < b.first ? -1 : a.first > b.first ? 1 : 0),
+  count: (a, b) => b.count - a.count || SN_SORTS.last(a, b),
+  far: (a, b) => (b.distance_km || -1) - (a.distance_km || -1) || SN_SORTS.last(a, b),
+  call: (a, b) => a.call.localeCompare(b.call),
+};
+
+function renderStations() {
+  const all = state.stations || [];
+  const sort = state.snSort || 'last';
+  for (const b of document.querySelectorAll('.sn-sort button')) b.setAttribute('aria-pressed', String(b.dataset.sort === sort));
+  const total = all.reduce((n, x) => n + x.count, 0);
+  $('sn-count').replaceChildren(el('b', '', fmtNum(all.length)), ` ${all.length === 1 ? 'station' : 'stations'}, ${plural(total, 'contact', 'contacts')}`);
+  const q = $('sn-search').value.trim().toLowerCase();
+  const shown = all.filter((x) => !q || [x.call, x.name, x.qth, x.country].some((v) => v && String(v).toLowerCase().includes(q)))
+    .sort(SN_SORTS[sort] || SN_SORTS.last);
+  const list = $('sn-list');
+  const scroll = list.scrollTop;
+  list.replaceChildren();
+  if (!all.length) { list.append(el('li', 'st-empty', 'Nothing logged yet. Look up a station, then press Log this contact.')); return; }
+  if (!shown.length) { list.append(el('li', 'st-empty', `No station in your log matches “${$('sn-search').value.trim()}”.`)); return; }
+  const SHOW = 300;   // a long log stays quick: the search finds the rest
+  for (const x of shown.slice(0, SHOW)) {
+    const b = el('button', 'sn-row');
+    b.type = 'button';
+    b.dataset.call = x.call;
+    b.setAttribute('aria-pressed', String(x.call === state.snPicked));
+    const who = [x.name, x.qth && x.qth !== x.country ? x.qth : '', x.country].filter(Boolean).join(' · ');
+    const when = x.count === 1 ? `Once, ${dayText(x.first)}` : `First ${dayText(x.first)} · last ${sinceText(x.last)}`;
+    b.append(el('span', 'sn-call', x.call), el('span', 'sn-who', who), el('span', 'sn-when', when),
+      el('span', 'sn-n', String(x.count)));
+    b.title = `${plural(x.count, 'contact', 'contacts')}${x.bands.length ? ' on ' + x.bands.map(bandLabel).join(', ') : ''}`;
+    b.addEventListener('click', () => pickStation(x.call));
+    const item = document.createElement('li');
+    item.append(b);
+    list.append(item);
+  }
+  if (shown.length > SHOW) list.append(el('li', 'st-empty sn-more', `Showing ${fmtNum(SHOW)} of ${fmtNum(shown.length)}. Search to find the others.`));
+  list.scrollTop = scroll;
+}
+
+async function pickStation(call) {
+  if (state.snPicked !== call) state.snNoteFor = null;
+  state.snPicked = call;
+  state.snEditing = state.snNoteFor || null;
+  for (const b of $('sn-list').querySelectorAll('.sn-row')) b.setAttribute('aria-pressed', String(b.dataset.call === call));
+  const row = $('sn-list').querySelector(`.sn-row[data-call="${CSS.escape(call)}"]`);
+  if (row) row.scrollIntoView({ block: 'nearest' });
+  try {
+    const data = await api.get('/api/log/station?call=' + encodeURIComponent(call));
+    if (state.snPicked !== call) return;
+    state.snContacts = data.contacts || [];
+  } catch (err) {
+    state.snContacts = null;
+  }
+  renderStationDetail();
+}
+
+function renderStationDetail() {
+  const box = $('sn-detail');
+  box.replaceChildren();
+  const x = (state.stations || []).find((s) => s.call === state.snPicked);
+  if (!x) {
+    box.append(el('p', 'zd-areas', 'Pick a station to see every contact with them: when you first and last talked, and your notes.'));
+    return;
+  }
+  const head = el('div', 'sn-head');
+  head.append(el('h3', 'sn-big', x.call));
+  const look = el('button', 'btn-outline sn-look', 'Look up');
+  look.type = 'button';
+  look.addEventListener('click', () => { closeStats(); lookUp(x.call); });
+  head.append(look);
+  box.append(head);
+  const who = [x.name, x.qth, x.country].filter((v, i, a) => v && a.indexOf(v) === i).join(', ');
+  if (who) box.append(el('p', 'zd-official', who));
+  const facts = el('dl', 'sn-facts');
+  const fact = (k, v) => facts.append(el('dt', '', k), el('dd', '', v));
+  const contacts = state.snContacts || [];
+  const firstQ = contacts[contacts.length - 1], lastQ = contacts[0];
+  fact('First contact', firstQ ? `${dayText(firstQ.time_on, true)}${qsoWhat(firstQ) ? ', ' + qsoWhat(firstQ) : ''}` : dayText(x.first, true));
+  if (x.count > 1) {
+    const ago = lastQ && sinceText(lastQ.time_on);
+    fact('Last contact', lastQ ? `${dayText(lastQ.time_on, true)}${qsoWhat(lastQ) ? ', ' + qsoWhat(lastQ) : ''}${ago === 'today' || ago === 'yesterday' ? '' : ` (${ago})`}`
+      : dayText(x.last, true));
+  }
+  const span = calendarSpan(x.first, x.last);
+  const over = span.days < 1 ? '' : span.days < 60 ? plural(span.days, 'day', 'days')
+    : span.years < 1 ? plural(span.months, 'month', 'months') : plural(span.years, 'year', 'years');
+  fact('Contacts', x.count === 1 ? 'One so far' : `${fmtNum(x.count)}${over ? `, over ${over}` : ''}`);
+  if (x.distance_km) fact('Distance', `${fmtNum(x.distance_km)} km`);
+  box.append(facts);
+  if (state.snContacts === null) { box.append(el('p', 'st-empty', 'The contacts didn’t load. Try again in a moment.')); return; }
+  const list = el('ol', 'sn-qsos');
+  for (const c of contacts) list.append(contactItem(c));
+  box.append(list);
+  const editing = box.querySelector('textarea');
+  if (editing) { editing.focus(); editing.setSelectionRange(editing.value.length, editing.value.length); }
+}
+
+function contactItem(c) {
+  const item = el('li', 'sn-qso');
+  const top = el('div', 'sn-qso-top');
+  top.append(el('span', 'sn-qso-when', `${timeIn(localTz(), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }, 'en-CA', new Date(c.time_on))} · ${clockText(c.time_on)}`));
+  const bits = [qsoWhat(c), c.freq_hz ? fmtFreq(c.freq_hz) : '', c.tx_pwr ? `${Math.round(c.tx_pwr)} W` : '', c.my_rig || ''].filter(Boolean);
+  top.append(el('span', 'sn-qso-what', bits.join(' · ')));
+  item.append(top);
+  if (state.snEditing === c.id) {
+    const area = el('textarea', 'sn-note-edit');
+    area.maxLength = 500;
+    area.rows = 3;
+    area.value = c.notes || '';
+    area.placeholder = 'What you talked about, their name, their rig, the weather there…';
+    area.setAttribute('aria-label', `Note for the contact with ${c.call}`);
+    const save = el('button', 'sn-note-save', 'Save note');
+    save.type = 'button';
+    const cancel = el('button', 'link-btn', 'Cancel');
+    cancel.type = 'button';
+    const done = () => { state.snEditing = null; state.snNoteFor = null; renderStationDetail(); };
+    save.addEventListener('click', () => saveNote(c, area.value));
+    cancel.addEventListener('click', done);
+    area.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); done(); }
+      else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveNote(c, area.value); }
+    });
+    const row = el('div', 'sn-note-btns');
+    row.append(save, cancel);
+    item.append(area, row);
+  } else {
+    if (c.notes) item.append(el('p', 'sn-note', c.notes));
+    const edit = el('button', 'link-btn sn-note-btn', c.notes ? 'Edit note' : 'Add a note');
+    edit.type = 'button';
+    edit.addEventListener('click', () => { state.snEditing = c.id; renderStationDetail(); });
+    item.append(edit);
+  }
+  return item;
+}
+
+async function saveNote(c, text) {
+  try {
+    const r = await api.post('/api/log/note', { id: c.id, notes: text });
+    c.notes = (r.contact && r.contact.notes) || null;
+  } catch (err) {
+    showToast('That note didn’t save. Try again in a moment.');
+    return;
+  }
+  state.snEditing = null;
+  state.snNoteFor = null;
+  const x = (state.stations || []).find((s) => s.call === c.call);
+  if (x && state.snContacts) x.notes = state.snContacts.filter((q) => q.notes).length;
+  renderStationDetail();
+  const saved = el('p', 'sn-saved', 'Note saved.');
+  $('sn-detail').append(saved);
+  setTimeout(() => saved.remove(), 3000);
 }
 
 async function loadCountries() {
@@ -1147,10 +1470,23 @@ async function pollRadio() {
   if (tx) renderTx(r); else state.swrHigh = 0;
   $('on-air').hidden = !r.ok || (r.tx !== true && r.tx !== false);   // hidden if the radio can't say
   $('on-air').classList.toggle('lit', tx);
-  renderMeter(r.ok && !tx ? r.s_db : null);   // while transmitting the meter shows output, not signals
+  const split = r.ok && r.split && r.split.on ? r.split : null;
+  const chip = $('radio-split');
+  chip.hidden = !split || tx;
+  if (split) {
+    const far = split.tx_hz && bandFor(split.tx_hz) !== bandFor(r.freq_hz);
+    chip.replaceChildren(el('b', '', 'SPLIT'), `TX ${split.tx_hz ? fmtFreq(split.tx_hz) : 'VFO B'}`);
+    chip.classList.toggle('far', !!far);
+    chip.title = far ? `Split is on, and the ${r.name} transmits on ${fmtFreq(split.tx_hz)}: a different band from where it listens. Check the radio before you transmit.`
+      : `Split is on: listening on ${fmtFreq(r.freq_hz)}, transmitting on ${split.tx_hz ? fmtFreq(split.tx_hz) + ' (' + offsetText(split.tx_hz - r.freq_hz) + ')' : 'VFO B'}.`
+      + (state.splitFor ? ` Click to show ${state.splitFor.call} again.` : '');
+  }
+  renderMeter(r.ok && !tx && !split ? r.s_db : null);   // while transmitting the meter shows output, not signals;
+                                                        // while split is on, the box says where it transmits
   state.radioOk = !!r.ok;
   state.radioBand = r.ok ? bandFor(r.freq_hz) : null;
   if (state.card && state.card.spot) $('btn-tune').hidden = !state.radioOk;
+  if (state.card) renderSplit();
   if (state.card && !state.logBandTouched && state.radioBand) setLogBand(state.radioBand);
   if (r.ok && !state.bandChosen) {
     const band = bandFor(r.freq_hz);
@@ -1301,14 +1637,43 @@ function renderChips(counts) {
 const NEW_TEXT = { country: 'A new country for your log', zone: 'A new CQ zone for your log', band: 'New on this band for your log' };
 const NEW_BADGE = { country: 'NEW', zone: 'ZONE', band: 'BAND' };
 
+// A DX station working split: s.split is {dir: 'up' or 'down', khz, to, tx_khz, why}, as /api/spots sends it.
+const fmtK = (khz) => String(Math.round(khz * 10) / 10);
+function splitSay(sp) {   // "up 5", "up 5 to 10", "down 2", or just "up"
+  return sp.khz ? `${sp.dir} ${fmtK(sp.khz)}${sp.to ? ' to ' + fmtK(sp.to) : ''}` : sp.dir;
+}
+function splitBadge(sp) {   // "UP5", "UP5-10", "DN2", or just "UP": the way spotters write it
+  return `${sp.dir === 'up' ? 'UP' : 'DN'}${sp.khz ? fmtK(sp.khz) + (sp.to ? '-' + fmtK(sp.to) : '') : ''}`;
+}
+function offsetText(hz) {   // transmit minus receive: "5 kHz up", "1.5 kHz down"
+  if (!hz) return 'on the same frequency';
+  return `${fmtK(Math.abs(hz) / 1000)} kHz ${hz > 0 ? 'up' : 'down'}`;
+}
+
+// The country, with the badges above it when there are any (so the name isn't squeezed out):
+// UP5 (working split), then NEW, ZONE or BAND.
 function countryCell(s) {
   const span = cell('r-country', '');
+  const badges = [];
+  if (s.split) {
+    const badge = cell('badge split', splitBadge(s.split));
+    badge.title = `Listening ${splitSay(s.split)}: working split`;
+    badges.push(badge);
+  }
   if (s.new) {
     const badge = cell('badge ' + s.new, NEW_BADGE[s.new]);
     badge.title = NEW_TEXT[s.new];
-    span.append(badge);
+    badges.push(badge);
   }
-  span.append(s.region || s.country || '');
+  const name = s.region || s.country || '';
+  if (!badges.length) {
+    span.append(name);
+    return span;
+  }
+  span.classList.add('stacked');
+  const top = cell('r-badges', '');
+  top.append(...badges);
+  span.append(top, cell('r-name', name));
   return span;
 }
 
@@ -1317,19 +1682,24 @@ function renderSpots(data) {
   const list = $('spot-list');
   list.replaceChildren();
   const spots = data.spots || [];
+  state.spots = spots;
   const picked = state.card && state.card.spot ? state.card.call : null;
   for (const s of spots) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'row spot' + (s.call === picked ? ' picked' : '');
+    const what = cell('r-what', s.freq_khz.toFixed(1));
+    if (s.mode) what.append(cell('r-mode', s.mode));   // what they're on: USB or LSB (or CW, FT8, ...)
     row.append(
       cell('r-when', s.age_min < 1 ? 'now' : `${s.age_min} min`),
       cell('r-call', s.call),
-      cell('r-what', s.freq_khz.toFixed(1)),
+      what,
       countryCell(s),
       cell('r-beam', s.bearing !== undefined ? `${s.bearing}°` : ''),
     );
-    row.title = (s.new ? NEW_TEXT[s.new] + '. ' : '') + (s.comment ? `${s.comment} (spotted by ${s.spotter})` : `Spotted by ${s.spotter}`);
+    const listening = s.split ? `, listening ${splitSay(s.split)}${s.split.tx_khz ? ` (${s.split.tx_khz.toFixed(1)})` : ''}` : '';
+    row.title = (s.new ? NEW_TEXT[s.new] + '. ' : '') + `On ${s.freq_khz.toFixed(1)} kHz${s.mode ? ' ' + s.mode : ''}${listening}. `
+      + (s.comment ? `${s.comment} (spotted by ${s.spotter})` : `Spotted by ${s.spotter}`);
     row.addEventListener('click', () => lookUp(s.call, s));
     const item = document.createElement('li');
     item.append(row);
@@ -1368,17 +1738,40 @@ async function refreshSpots() {
   } catch (err) { /* keep what is showing */ }
 }
 
+// The sideband to tune or log a spot on: the one the spot shows, or else the usual one for the band
+// (LSB below 10 MHz, USB from 10 MHz up and on the 60 m channels).
+function spotSideband(spot) {
+  if (spot.mode === 'USB' || spot.mode === 'LSB') return spot.mode;
+  return spot.freq_khz >= 10000 || (spot.freq_khz >= 5250 && spot.freq_khz <= 5450) ? 'USB' : 'LSB';
+}
+
 async function tuneToSpot() {
   const spot = state.card && state.card.spot;
   if (!spot) return;
-  const mode = spot.freq_khz < 10000 ? 'LSB' : 'USB';
+  const mode = spotSideband(spot);
   const hz = Math.round(spot.freq_khz * 1000);
+  const dx = spot.split && spot.split.tx_khz && !spot.split.why ? Math.round(spot.split.tx_khz * 1000) : null;
   try {
-    const r = await api.post('/api/rig/tune', { freq_hz: hz, mode });
+    const r = await api.post('/api/rig/tune', { freq_hz: hz, mode, split_tx_hz: dx });
     let text = 'The radio isn’t connected right now.';
-    if (r.ok) {
+    const sp = r.split;
+    if (r.ok && sp && sp.set) {
+      text = `${r.radio ? 'The ' + r.radio : 'The radio'} is listening on ${fmtFreq(hz)} ${mode} and transmitting on `
+        + `${fmtFreq(sp.tx_hz)} (split, ${offsetText(sp.tx_hz - hz)})${r.note ? ', since ' + r.note : ''}.`;
+      state.splitFor = { call: state.card.call, spot };
+    } else if (r.ok) {
       text = `${r.radio ? 'The ' + r.radio : 'The radio'} is tuned to ${fmtFreq(hz)} ${mode}${r.note ? ', since ' + r.note : ''}.`;
-    } else if (r.no_antenna) {
+      if (sp && dx) text += ` Split isn’t set: ${sp.why || 'the radio didn’t take it'}.`;
+      else if (spot.split && spot.split.why) text += ` Split isn’t set: ${spot.split.why}.`;
+      if (sp && sp.off === true) text += ' Split is off.';
+      if (sp && sp.off === false) text += ' Split is still on: turn it off on the radio.';
+    }
+    if (r.ok && sp && state.radio && state.radio.ok) {   // show it straight away; the next reading confirms it
+      if (sp.set) state.radio.split = { on: true, tx_hz: sp.tx_hz };
+      else if (sp.off) state.radio.split = { on: false };
+      renderSplit();
+    }
+    if (!r.ok && r.no_antenna) {
       const other = ((state.cfg && state.cfg.radios) || []).find((x) => x.set_up && x.name !== r.radio && (x.bands || []).includes(r.no_antenna));
       text = `The ${r.radio} has no ${bandLabel(r.no_antenna)} antenna${other ? `. Switch on the ${other.name} and try again` : ''}.`;
     }
@@ -1387,6 +1780,55 @@ async function tuneToSpot() {
   } catch (err) {
     showToast('The radio isn’t connected right now.');
   }
+}
+
+// Split on the station card. For a spot of a DX station working split that the radio isn't tuned to yet:
+// where they're listening and what Tune to will do. Otherwise, while split is on: where the radio transmits,
+// with buttons to move it or turn split off (the buttons also start split once tuned to a DX station).
+function renderSplit() {
+  const box = $('c-split');
+  const card = state.card;
+  const r = state.radio || {};
+  const on = r.ok && r.split && r.split.on ? r.split : null;
+  const spot = card && card.spot;
+  const dx = spot && spot.split;
+  const tunedHere = !!(spot && r.ok && Math.abs(r.freq_hz - spot.freq_khz * 1000) <= 500);
+  if (!card || (!on && !dx)) { box.hidden = true; return; }
+  box.hidden = false;
+  const text = $('c-split-text');
+  if (on && (!dx || tunedHere)) {
+    const off = on.tx_hz ? on.tx_hz - r.freq_hz : null;
+    text.replaceChildren(el('b', 'split-tag', 'SPLIT'), 'Transmitting on ', el('span', 'split-tx', on.tx_hz ? fmtFreq(on.tx_hz) : 'VFO B'),
+      off !== null ? `, ${offsetText(off)}` : '');
+  } else if (dx.khz && !dx.why) {
+    text.textContent = `Listening ${splitSay(dx)}: Tune to also sets your transmit to ${fmtFreq(Math.round(dx.tx_khz * 1000))} (split).`;
+  } else if (dx.khz) {
+    text.textContent = `Listening ${splitSay(dx)}, but ${dx.why}, so Tune to won\u2019t set split.`;
+  } else {
+    text.textContent = `Listening ${dx.dir}: the spot doesn\u2019t say how far. Tune to, then move your transmit with \u22121 or +1 kHz.`;
+  }
+  const buttons = r.ok && (on ? !dx || tunedHere : tunedHere && !dx.why);
+  $('c-split-btns').hidden = !buttons;
+  $('split-off').hidden = !on;
+}
+
+async function moveSplit(body) {
+  let r;
+  try { r = await api.post('/api/rig/split', body); } catch (err) { showToast('The radio isn\u2019t answering right now.'); return; }
+  if (!r.ok) showToast(body.off ? 'Split didn\u2019t turn off. Use SPLIT on the radio.' : `Not moved: ${r.why || 'the radio didn\u2019t take it'}.`);
+  else if (body.off) showToast(`Split is off: the ${r.radio} transmits where it listens again.`);
+  if (r.split !== undefined && state.radio && state.radio.ok) state.radio.split = r.split;
+  renderSplit();
+  pollRadio();
+}
+
+// The radio box's SPLIT chip: back to the station split was set for, if there is one.
+function splitChipClicked() {
+  const r = state.radio || {};
+  if (state.splitFor) { lookUp(state.splitFor.call, state.splitFor.spot); return; }
+  const tx = r.split && r.split.tx_hz ? fmtFreq(r.split.tx_hz) : 'VFO B';
+  showToast(`Split is on: the ${r.name || 'radio'} listens on ${fmtFreq(r.freq_hz)} and transmits on ${tx}. `
+    + 'Press SPLIT on the radio to turn it off, or Tune to a spot.');
 }
 
 /* ---------- Band conditions (N0NBH) ---------- */
@@ -1488,6 +1930,103 @@ function hideOpenings() {
   $('open-marks').setAttribute('d', '');
   $('open-chip').hidden = true;
   for (const button of $('open-list').querySelectorAll('button')) button.setAttribute('aria-pressed', 'false');
+  if (dotTipShown) { hideTip(); dotTipShown = false; }
+}
+
+// Dots on the maps: a green one is a station hearing the area, a blue one a station spotted on the DX cluster.
+// Pointing at one says who it is (and, for a spot, the frequency and sideband they're on); clicking it looks them up.
+// hit: {open: p}, p as /api/openings sends it ([lat, lon, km, call, heard, mode, snr, time, country, bearing]),
+// {spot: s}, s as /api/spots sends it, or {ft8: f}, a station WSJT-X heard, as /api/ft8/heard sends it.
+let dotTipShown = false;
+function dotTip(hit, e) {
+  if (!hit) {
+    if (dotTipShown) { hideTip(); dotTipShown = false; }
+    return;
+  }
+  const tip = $('chart-tip');
+  const br = () => document.createElement('br');
+  if (hit.ft8) {
+    const f = hit.ft8;
+    const where = [f.region || f.country, f.grid].filter(Boolean).join(', ');
+    const signal = typeof f.snr === 'number' ? `${f.snr > 0 ? '+' : f.snr < 0 ? '−' : ''}${Math.abs(f.snr)} dB` : '';
+    const mins = Math.max(0, Math.round((Date.now() / 1000 - f.t) / 60));
+    tip.replaceChildren(
+      el('b', 'tip-ft8', f.call), where ? ` · ${where}` : '', br(),
+      `Heard here on ${f.mode || 'FT8'}${f.cq ? ', calling CQ' : ''}${signal ? `: ${signal}` : ''}, ${mins < 1 ? 'just now' : `${mins} min ago`}`, br(),
+      ...(f.freq_hz ? [el('span', 'tip-freq', `On ${fmtFreq(f.freq_hz)}`), br()] : []),
+      ...(typeof f.km === 'number' ? [`${fmtNum(f.km)} km${typeof f.bearing === 'number' ? `, beam heading ${f.bearing}°` : ''}`, br()] : []),
+      el('span', 'tip-hint', 'Click to look them up.'));
+  } else if (hit.spot) {
+    const s = hit.spot;
+    const where = s.region || s.country;
+    const note = (s.comment || '').trim();
+    const ago = s.age_min < 1 ? 'just now' : `${s.age_min} min ago`;
+    tip.replaceChildren(
+      el('b', 'tip-spot', s.call), where ? ` · ${where}` : '', br(),
+      el('span', 'tip-freq', `On ${fmtFreq(Math.round(s.freq_khz * 1000))}${s.mode ? ' ' + s.mode : ''}`), br(),
+      ...(s.split ? [el('span', 'tip-split', `Listening ${splitSay(s.split)}${s.split.tx_khz && !s.split.why
+        ? `: transmit on ${fmtFreq(Math.round(s.split.tx_khz * 1000))}` : ''}`), br()] : []),
+      `Spotted by ${s.spotter} ${ago}${note ? `: “${note.length > 40 ? note.slice(0, 39) + '…' : note}”` : ''}`, br(),
+      ...(typeof s.distance_km === 'number' ? [`${fmtNum(s.distance_km)} km, beam heading ${s.bearing}°`, br()] : []),
+      el('span', 'tip-hint', 'Click to look them up.'));
+  } else {
+    const [, , km, call, heard, mode, snr, time, country, bearing] = hit.open;
+    const signal = typeof snr === 'number' ? `${snr > 0 ? '+' : snr < 0 ? '−' : ''}${Math.abs(snr)} dB` : '';
+    const report = [mode, signal].filter(Boolean).join(', ');
+    const mins = typeof time === 'number' ? Math.max(0, Math.round((Date.now() / 1000 - time) / 60)) : null;
+    const when = mins === null ? '' : mins < 1 ? ' just now' : ` ${mins} min ago`;
+    tip.replaceChildren(
+      el('b', 'tip-call', call), country ? ` · ${country}` : '', br(),
+      `Heard ${heard || 'a station near you'}${report ? ` (${report})` : ''}${when}`, br(),
+      `${fmtNum(km)} km${typeof bearing === 'number' ? `, beam heading ${bearing}°` : ''}`, br(),
+      el('span', 'tip-hint', 'Click to look them up.'));
+  }
+  tip.hidden = false;
+  dotTipShown = true;
+  placeTip(e);
+}
+function lookUpDot(hit) {
+  dotTip(null);
+  if (hit.spot) lookUp(hit.spot.call, hit.spot);   // as from the spot list, so "Tune to" is there
+  else if (hit.ft8) lookUp(hit.ft8.call);
+  else lookUp(hit.open[3]);
+}
+// The flat map's dots are drawn in its overlay: find the one under the pointer, if any.
+function flatDotAt(e) {
+  if ($('map').dataset.view !== 'flat') return null;
+  const m = $('flat-overlay').getScreenCTM();
+  if (!m) return null;
+  let best = null, bd = 10 * 10;
+  const near = (lat, lon, hit) => {
+    const X = px(lon), Y = py(lat);
+    const d = (m.a * X + m.c * Y + m.e - e.clientX) ** 2 + (m.b * X + m.d * Y + m.f - e.clientY) ** 2;
+    if (d < bd) { bd = d; best = hit; }
+  };
+  const b = state.openBand && state.openings && state.openings.bands.find((x) => x.band === state.openBand);
+  if (b) for (const p of b.points) near(p[0], p[1], { open: p });   // drawn on top, so they win a tie
+  for (const s of state.spots || []) if (s.lat !== null && s.lat !== undefined) near(s.lat, s.lon, { spot: s });
+  for (const f of ft8Rows()) near(f.lat, f.lon, { ft8: f });   // drawn under the others, so they lose a tie
+  return best;
+}
+
+/* ---------- What WSJT-X hears here (FT8): small violet dots on the maps, from the station app ---------- */
+// The station app listens to WSJT-X's own network messages and keeps the stations it decoded in the last 15
+// minutes (where each one is, from its grid square or its country). Pointing at a dot says who, how strong and
+// how far; clicking it looks them up.
+const ft8Rows = () => (state.ft8 && state.ft8.on && state.ft8.stations) || [];
+async function refreshFt8() {
+  try { state.ft8 = await api.get('/api/ft8/heard'); } catch (err) { return; }
+  renderFt8();
+}
+function renderFt8() {
+  const rows = ft8Rows().filter((f) => f.lat !== null && f.lat !== undefined);
+  $('ft8-marks').setAttribute('d', markPath(rows.map((f) => [px(f.lon), py(f.lat)]), 3.6));
+  Maps.setFt8(rows);
+  $('legend-ft8').hidden = !rows.length;
+  if (rows.length) {
+    const modes = new Set(rows.map((f) => f.mode || 'FT8'));
+    $('legend-ft8-text').textContent = `${modes.size === 1 ? `Heard on ${[...modes][0]}` : 'Heard by WSJT-X'} (${rows.length})`;
+  }
 }
 
 async function refreshHeard() {
@@ -1963,6 +2502,7 @@ async function refreshIss() {
 /* ---------- Tabs: On the air / My log ---------- */
 function showTab(name) {
   state.tab = name;
+  if (name === 'log') $('tab-log').classList.remove('has-new', 'flash');
   for (const [tab, panel] of [['tab-spots', 'panel-spots'], ['tab-log', 'panel-log']]) {
     const on = panel === `panel-${name}`;
     $(tab).setAttribute('aria-selected', String(on));
@@ -1994,7 +2534,13 @@ function setupInput() {
   });
   document.addEventListener('keydown', (e) => {
     if (!$('stats-dlg').hidden) {
-      if (e.key === 'Escape') { closeStats(); return; }
+      const typing = e.target instanceof Element && e.target.closest('input, textarea, select');
+      if (e.key === 'Escape') {
+        if (e.target === $('sn-search') && $('sn-search').value) { $('sn-search').value = ''; renderStations(); return; }
+        closeStats();
+        return;
+      }
+      if (typing) return;   // the Stations search box and the notes take their own typing
       if (/^[a-z0-9/]$/i.test(e.key) && !e.ctrlKey && !e.altKey && !e.metaKey) closeStats();   // typing a callsign
       else return;
     }
@@ -2023,6 +2569,10 @@ function setupInput() {
   });
   $('btn-log').addEventListener('click', logContact);
   $('btn-tune').addEventListener('click', tuneToSpot);
+  $('split-up').addEventListener('click', () => moveSplit({ step_hz: 1000 }));
+  $('split-down').addEventListener('click', () => moveSplit({ step_hz: -1000 }));
+  $('split-off').addEventListener('click', () => moveSplit({ off: true }));
+  $('radio-split').addEventListener('click', splitChipClicked);
   $('my-call').addEventListener('click', () => { if (state.cfg) Welcome.play(state.cfg); });
   $('checklist-link').addEventListener('click', openChecklist);
   $('radio-name').addEventListener('click', pickOtherRadio);
@@ -2037,6 +2587,12 @@ function setupInput() {
     refreshSpots();
   });
   $('toast-undo').addEventListener('click', undoLog);
+  $('toast-note').addEventListener('click', addNoteFromToast);
+  $('c-history-btn').addEventListener('click', () => { if (state.card) openStats('stations', { call: state.card.call }); });
+  $('sn-search').addEventListener('input', renderStations);
+  for (const b of document.querySelectorAll('.sn-sort button')) {
+    b.addEventListener('click', () => { state.snSort = b.dataset.sort; $('sn-list').scrollTop = 0; renderStations(); });
+  }
   $('btn-fav').addEventListener('click', openFavourites);
   $('fav-close').addEventListener('click', closeFavourites);
   $('fav').addEventListener('click', (e) => { if (e.target === $('fav')) closeFavourites(); });
@@ -2067,6 +2623,20 @@ function setupInput() {
   $('listen-close').addEventListener('click', closeListen);
   $('listen-dlg').addEventListener('click', (e) => { if (e.target === $('listen-dlg')) closeListen(); });
   $('open-chip-close').addEventListener('click', hideOpenings);
+  Maps.onDot(lookUpDot, dotTip);
+  const flatView = $('map').querySelector('.view-flat');
+  flatView.addEventListener('pointermove', (e) => {
+    const dot = flatDotAt(e);
+    flatView.style.cursor = dot ? 'pointer' : '';
+    dotTip(dot, e);
+  });
+  flatView.addEventListener('pointerleave', () => dotTip(null));
+  flatView.addEventListener('click', (e) => {   // before a zone number's own click
+    const dot = flatDotAt(e);
+    if (!dot) return;
+    e.stopPropagation();
+    lookUpDot(dot);
+  }, true);
   $('space-chip').addEventListener('click', () => openLink({ id: 'alert:space' }));
   $('card-close').addEventListener('click', clearCard);
   for (const b of $('views').querySelectorAll('button')) b.addEventListener('click', () => pickMapView(b.dataset.view));
@@ -2093,11 +2663,13 @@ async function start() {
   setupZoneLabels();
   loadZones().then(markZones);
   startMaps();
+  watchLegend();
   pollRadio();
   refreshLog();
   refreshEvents();
   refreshSpots();
   refreshHeard();
+  refreshFt8();
   refreshConditions();
   refreshAlerts();
   refreshIss();
@@ -2111,6 +2683,7 @@ async function start() {
   setInterval(refreshOpenings, 30 * 1000);
   setInterval(refreshSpots, 20 * 1000);
   setInterval(refreshHeard, 30 * 1000);
+  setInterval(refreshFt8, 15 * 1000);   // WSJT-X decodes every 15 seconds
   setInterval(refreshConditions, 10 * 60 * 1000);
   setInterval(refreshAlerts, 60 * 1000);
   setInterval(drawGrayLine, 30 * 1000);

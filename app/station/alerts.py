@@ -111,7 +111,7 @@ def parse_weather(xml_bytes, region):
         title = (entry.findtext(ATOM + "title") or "").strip()
         if not title or title.lower().startswith("no alerts") or " ENDED" in title.upper():
             continue
-        name = title.rsplit(",", 1)[0].strip()   # "SEVERE THUNDERSTORM WARNING, Red Deer Co. near Pine Lake"
+        name = title.rsplit(",", 1)[0].strip()   # "SEVERE THUNDERSTORM WARNING, <the area's name>"
         upper = name.upper()
         level = ("warning" if "WARNING" in upper else "watch" if "WATCH" in upper
                  else "advisory" if "ADVISORY" in upper else "statement")

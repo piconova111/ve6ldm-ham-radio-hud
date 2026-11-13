@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waterfall</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/waterfall.css">
+</head>
+<body>
+<div class="wf">
+  <header class="wf-head">
+    <div class="wf-radio">
+      <span class="wf-name" id="wf-name">Radio</span>
+      <span class="wf-freq" id="wf-freq">&mdash;</span>
+      <span class="wf-mode" id="wf-mode"></span>
+      <span class="wf-onair" id="wf-onair" title="Lights while the radio transmits">ON AIR</span>
+      <span class="wf-split" id="wf-split" hidden></span>
+      <span class="wf-ears" id="wf-ears" hidden
+            title="Someone is listening to this radio from another computer (station listen). It only listens: it can't tune the radio or transmit.">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4.5" height="7" rx="1.5"/><rect x="16.5" y="14" width="4.5" height="7" rx="1.5"/></svg>
+        <span id="wf-ears-text">Remote listener</span>
+      </span>
+    </div>
+    <div class="wf-tools">
+      <button type="button" class="wf-ft8" id="wf-ft8" hidden title="Opens WSJT-X, for FT8, on this screen">FT8</button>
+      <div class="wf-zoom" id="wf-zoom" role="group" aria-label="How much of the band to show">
+        <button type="button" data-span="20000">20 kHz</button>
+        <button type="button" data-span="50000">50 kHz</button>
+        <button type="button" data-span="100000">100 kHz</button>
+        <button type="button" data-span="200000">200 kHz</button>
+        <button type="button" data-span="band">Whole band</button>
+      </div>
+    </div>
+  </header>
+  <section class="wf-listen" id="wf-listen" aria-label="Listening" hidden>
+    <button type="button" class="ls-play" id="ls-play" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4.5" height="7" rx="1.5"/><rect x="16.5" y="14" width="4.5" height="7" rx="1.5"/></svg>
+      <span id="ls-play-text">Listen</span>
+    </button>
+    <div class="ls-group" id="ls-what" role="group" aria-label="What to listen to">
+      <button type="button" data-follow="1" aria-pressed="true">Follow the <span class="ls-radio">radio</span></button>
+      <button type="button" data-follow="0" aria-pressed="false">Where I click</button>
+    </div>
+    <div class="ls-group" id="ls-kinds" role="group" aria-label="Sideband">
+      <button type="button" data-kind="USB">USB</button>
+      <button type="button" data-kind="LSB">LSB</button>
+      <button type="button" data-kind="AM">AM</button>
+      <button type="button" data-kind="CW">CW</button>
+    </div>
+    <div class="ls-fine" title="Moves only what you hear, not the radio. Shift-click for 50 Hz; double-click the number for 0.">
+      <span class="ls-label">Fine tune</span>
+      <button type="button" id="ls-down" aria-label="10 Hz lower">&minus;</button>
+      <output id="ls-fine">0 Hz</output>
+      <button type="button" id="ls-up" aria-label="10 Hz higher">+</button>
+    </div>
+    <label class="ls-vol"><span class="ls-label">Volume</span><input type="range" id="ls-vol" min="0" max="100" value="70"></label>
+    <div class="ls-level" aria-hidden="true"><span class="ls-label">Sound</span><span class="ls-meter"><span id="ls-meter"></span></span></div>
+    <span class="ls-status" id="ls-status" role="status">Press Listen to hear the radio.</span>
+  </section>
+  <main class="wf-main" id="wf-main">
+    <canvas id="wf-spec"></canvas>
+    <canvas id="wf-falls"></canvas>
+    <canvas id="wf-over" class="wf-over"></canvas>
+    <div class="wf-tip" id="wf-tip" hidden></div>
+    <div class="wf-msg" id="wf-msg" hidden></div>
+  </main>
+  <footer class="wf-foot">
+    <span class="wf-status" id="wf-status">Starting the waterfall&hellip;</span>
+    <span class="wf-key" aria-hidden="true">
+      <span class="key key-rx"></span>where the radio listens
+      <span class="key key-tx"></span>you, transmitting
+      <span class="key key-split"></span>where it transmits (split)
+      <span class="key key-listen" id="key-listen" hidden></span><span id="key-listen-text" hidden>where you listen</span>
+    </span>
+  </footer>
+  <div class="wf-toast" id="wf-toast" role="status" hidden></div>
+</div>
+<script src="/static/waterfall.js"></script>
+</body>
+</html>

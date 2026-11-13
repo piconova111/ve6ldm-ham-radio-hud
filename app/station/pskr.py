@@ -32,6 +32,9 @@ WINDOW = 15 * 60          # band openings: the last 15 minutes
 KEEP_OWN = 24 * 3600      # reports of the station's own signals: the last day
 BAND_ORDER = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m", "2m", "70cm"]
 MAX_POINTS = 400          # receivers per band sent to the display
+# Each receiver is sent as [lat, lon, km, call, heard, mode, snr, time, country, bearing]: where it is,
+# how far, its callsign, the station near here it heard, the mode, the signal report (dB), when
+# (Unix time), its country, and the beam heading to it. The display uses them for the green dots.
 
 
 def say(message):
@@ -258,10 +261,13 @@ class Openings:
             "sender": str(spot.get("sc") or "").upper(), "freq_hz": spot.get("f"),
         }
         own = base_call(report["sender"]) == self.callsign
+        # The station's own reports (WSJT-X sharing what it hears) of a station nearby: it's not one of the stations
+        # hearing the area, it's in it, and what it hears shows on the map from WSJT-X itself.
+        hearing_self = bool(self.callsign) and base_call(receiver) == self.callsign
         with self._lock:
             if own:
                 self.own[(band, receiver)] = report
-            if not own or str(spot.get("sl") or "")[:4].upper() in self.squares:
+            if (not own or str(spot.get("sl") or "")[:4].upper() in self.squares) and not hearing_self:
                 self.area[(band, receiver)] = report
             if len(self.area) > 20000:           # very busy: drop the oldest
                 for key in sorted(self.area, key=lambda k: self.area[k]["time"])[:5000]:
@@ -300,7 +306,8 @@ class Openings:
                 "band": band, "receivers": len(rows), "senders": len({r["sender"] for r in rows}),
                 "continents": sorted(continents.items(), key=lambda kv: -kv[1]),
                 "farthest": {"call": far["call"], "km": far["km"], "country": far["country"]},
-                "points": [[r["lat"], r["lon"], r["km"], r["call"]]
+                "points": [[r["lat"], r["lon"], r["km"], r["call"], r["sender"], r["mode"], r["snr"],
+                            r["time"], r["country"], r["bearing"]]
                            for r in sorted(rows, key=lambda r: -r["km"])[:MAX_POINTS]],
             })
         return {

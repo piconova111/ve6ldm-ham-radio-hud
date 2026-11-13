@@ -16,12 +16,16 @@ Travis. The code was written by Claude, Anthropic's AI model, working with Travi
 ## What it does
 
 **On the air**
-- Live DX cluster spots for the band you pick, with the country, beam heading and how long ago.
+- Live DX cluster spots for the band you pick, with the sideband they're on (USB or LSB), the country,
+  beam heading and how long ago. Point at a spot on the map to see who it is and where they are on the dial.
   NEW, ZONE and BAND badges mark a new country, a new CQ zone, or a country that's new on that band.
 - It moves to a backup node by itself if a cluster node goes quiet, and tries the first one again every hour.
 - Your radio's frequency, mode and S-meter, read through [Hamlib](https://hamlib.github.io/).
   While you transmit, an ON AIR light, the power going out and the SWR.
-- **Tune to** sends the radio to a spot's frequency. The app reads and tunes the radio; it never transmits.
+- **Tune to** sends the radio to a spot's frequency and sideband. The app reads and tunes the radio; it never transmits.
+- Working split: spots that say UP 5 or QSX 14.210 are marked, **Tune to** sets the radio to transmit where the DX
+  station is listening, and the display shows SPLIT and the transmit frequency, with buttons to move it or turn split off.
+  It won't set a transmit frequency outside the band.
 - Up to two radios. The display follows the one in use, and **Tune to** picks the radio
   that has an antenna for the band.
 
@@ -34,22 +38,43 @@ Travis. The code was written by Claude, Anthropic's AI model, working with Travi
 - QRZ and Canadian call sign look-up buttons open in the web browser.
 
 **Your log**
-- Log a contact with one click. The frequency, mode and radio come from the radio itself.
+- Log a contact with one click (the button confirms it). The frequency, mode and radio come from the
+  radio itself. Each contact can carry a note.
 - Save the log as ADIF for Logbook of the World or QRZ.
-- Stats: contacts, DXCC countries, CQ zones (toward WAZ), continents and bands, with charts.
+- Stats: contacts, DXCC countries, CQ zones (toward WAZ), continents and bands, with charts; every station
+  worked with the first and last contact; the ones talked to most; and contacts on this date in past years.
 
 **Around the screen**
 - Band conditions by day and night, and space weather from NOAA. Weather alerts from Environment Canada
   (Canada only), with a reminder to disconnect the antennas when there's a thunderstorm.
 - **Who can hear you:** where signals from stations near you are being heard right now, from
-  PSK Reporter's live feed, plus any DX cluster spots of your own call.
+  PSK Reporter's live feed, plus any DX cluster spots of your own call. Point at a green dot on the
+  map to see who's listening, and click it to look them up.
 - **Listen to yourself:** a public KiwiSDR receiver a good distance away, tuned to your frequency.
 - Satellite passes for the ISS and the FM satellites (SO-50, AO-123, AO-91, PO-101), with a sky chart,
   where to point, the frequencies with Doppler steps, and AMSAT's latest reports.
 - The big phone contests coming up.
 - Your favourite ham websites, one click away.
-- Optional: a waterfall from an RTL-SDR tapped into the radio's IF, shown in Gqrx with its scale
-  following the radio's dial.
+- Optional: a waterfall from an RTL-SDR tapped into the radio's IF, centred on the radio's dial like a
+  rig's own scope. It follows the dial, the band and the sideband, shows your own transmissions in red,
+  puts DX spots' callsigns on their signals, and tunes the radio to any signal you click. It keeps itself
+  on frequency by checking shortwave broadcast stations, whose carriers sit exactly on 5 kHz steps
+  (for each mode: the radio can put USB and LSB a little differently at its IF).
+- **Listen from another computer:** `station listen` opens the waterfall in that computer's browser with a
+  Listen button, and plays the sound from the waterfall's own receiver: the radio's frequency (both sides
+  of a contact, your own transmissions included) or any signal you click, in USB, LSB, AM or CW. It only
+  listens: it never tunes the radio. While someone listens, the station's waterfall says so.
+- **FT8 with WSJT-X, receive only, nothing to buy:** with the waterfall's SDR, WSJT-X hears the radio through
+  a virtual microphone fed from that receiver, and follows the radio's frequency through a receive-only radio
+  link that refuses anything that would make the radio transmit. The installer adds WSJT-X 3.0.2 and gives
+  it the station's settings; the health report checks WSJT-X's sound, its radio link and the computer's clock.
+  An FT8 button at the top of the waterfall opens WSJT-X, brings it to the front, or puts it away, and the
+  stations WSJT-X hears show on the station display's map for 15 minutes (from WSJT-X's own UDP reports; the
+  app only listens).
+- **Windows beside the waterfall:** what opens on the computer's own screen (WSJT-X, the web browser, any other
+  program) goes in a side area on the right, and the waterfall narrows to make room, so nothing covers it; it
+  takes the whole screen again when they're closed or minimized. Nothing new is left over the station display.
+  It's a small desktop helper (python3-xlib) that asks the window manager, as a taskbar would.
 
 **Small touches**
 - A welcome banner when the computer starts, with your callsign and radio waves going out around the world.
@@ -96,7 +121,9 @@ The screenshots are from a test run with sample spots and a sample log.
   and an RTL-SDR on the radio's IF output for the waterfall.
 
 The app needs only Python 3.9 or newer and its standard library (python3-sgp4 is used for satellite
-orbits if it's installed). The display is a web page shown full-screen in Chromium.
+orbits if it's installed). The waterfall also uses NumPy and rtl_tcp from the rtl-sdr package, and the
+window layout beside it python3-xlib; the installer adds them when the waterfall is switched on. FT8 uses WSJT-X and pactl (from pulseaudio-utils,
+with PipeWire or PulseAudio), which the installer adds when FT8 is switched on. The display is a web page shown full-screen in Chromium.
 
 ## Install
 
@@ -143,7 +170,9 @@ The main ones:
 | `[alerts]` | Environment Canada alert area and NOAA space weather |
 | `[satellites]` | Which FM satellites to show |
 | `[openings]` | PSK Reporter's live feed on or off |
-| `[waterfall]` | The optional SDR waterfall and the radio's IF frequency |
+| `[waterfall]` | The optional SDR waterfall: the radio's IF frequency, the SDR's gain, and picture corrections |
+| `[layout]` | With the waterfall: windows beside it on or off, and the side area's width |
+| `[ft8]` | FT8 with WSJT-X (receive only) on or off, and its receive-only radio link's port |
 
 [HELP.txt](HELP.txt) is the handy-commands sheet: it's copied to `~/station/HELP.txt` on the station.
 
@@ -155,7 +184,8 @@ it asks which station computer to look after (`user@name`, the way you'd type it
 
 ```text
 station status     health report: app, radio links, spots, backups, version
-station screen     see the station display live (needs tigervnc-viewer)
+station screen     see the station display live, shrunk to fit this screen (needs tigervnc-viewer)
+station listen     hear the radio: the waterfall with a Listen button, in this computer's browser
 station update F   install a new version from a package file
 station settings   edit config.ini, then restart the app
 station feedback   the tester checklist's answers and notes
@@ -166,8 +196,14 @@ station backups    copy the logbook backups to this computer
 ## Safe by design
 
 - The app never transmits. Hamlib's transmit command is never sent; the radio link only reads the
-  radio and sets its frequency and mode when you press **Tune to**.
+  radio, and sets its frequency and mode (and, for split, where it transmits) when you ask it to.
 - The app only listens on the station computer itself (127.0.0.1), so nothing on the network can reach it.
+  `station listen` reaches it through SSH, and its sound only listens (to the waterfall's own receiver).
+- WSJT-X (for FT8) reaches the radio only through the app's receive-only link, which passes on reads and
+  tuning and refuses transmitting, the tuner's tune, CW and voice-memory sending, raw radio commands and
+  anything else. This matters: Hamlib's NET rigctl client (4.5 and 4.7 checked) takes the PTT type from
+  rigctld when it connects, so WSJT-X set to PTT method VOX would otherwise key the radio by CAT whenever it
+  transmits.
 - The display can only ask the app to open one of its own links (favourites, look-up sites, alert pages,
   KiwiSDR receivers from the public list), never an address of its own.
 - What leaves the computer: your callsign, to sign in to the DX cluster and to follow reports of your own
@@ -190,7 +226,8 @@ The display stands on the work of many hams and organisations who share their da
   [GeoNames](https://www.geonames.org) postal codes (CC BY 4.0) for Canadian home towns
 - [Natural Earth](https://www.naturalearthdata.com) (public domain) for the coastlines
 - EI8IC's CQ zone list at [mapability.com](https://www.mapability.com) for checking the zone map
-- [HamQTH](https://www.hamqth.com), [Hamlib](https://hamlib.github.io/) and [Gqrx](https://www.gqrx.dk)
+- [HamQTH](https://www.hamqth.com), [Hamlib](https://hamlib.github.io/), Osmocom's
+  [rtl-sdr](https://gitea.osmocom.org/sdr/rtl-sdr) (rtl_tcp) and [NumPy](https://numpy.org)
 - The B612 fonts by Airbus and Intactile Design (SIL Open Font License), downloaded at install time
 
 ## Who made it
