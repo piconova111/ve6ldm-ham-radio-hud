@@ -53,6 +53,13 @@ Spots .................. each spot shows the frequency and the sideband the stat
                          10 MHz, USB above). Point at a blue spot on the map to see who it is, where they are on
                          the dial and the spotter's note; click it to look them up. "Tune to" sets the radio to
                          that frequency and sideband.
+Tune to ................ on the station card, however the station was looked up (typed in, or from the spot list,
+                         the map, My log or the stats): their latest spot of the last 30 minutes, on any band (a
+                         voice spot first), with split if they're working it. For FT8 (WSJT-X heard them in the
+                         last 15 minutes, or a spot says FT8 or FT4) it tunes to that band's FT8 frequency, in USB,
+                         so WSJT-X shows them. Under it: how long ago they were spotted or heard. With the radio not
+                         connected it says where instead, and for a station nobody has spotted lately, "Not spotted
+                         in the last 30 minutes". An open card notices a new spot within about 20 seconds.
 Working split .......... a DX station listening somewhere else (the spot says UP 5, DN 2, QSX 14.210 ...) is marked
                          by its country: UP5 = listening 5 kHz up. "Tune to" then sets the radio to listen
                          on the DX station and transmit where they're listening (the near end of a range like

@@ -63,6 +63,7 @@ function tickClocks() {
   const hello = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   $('greeting').textContent = state.cfg && state.cfg.operator ? `${hello}, ${state.cfg.operator}` : hello;
   showSpecialDay(now);
+  if (state.card) renderTune();   // "spotted 6 min ago" stays true
   const card = state.card;
   if (card && card.timezone) {
     $('c-time').textContent = timeIn(card.timezone, { hour: 'numeric', minute: '2-digit' }, 'en-CA', now);
@@ -356,12 +357,13 @@ function buildLogBands() {
 
 function renderFound(card, spot) {
   state.card = card;
-  card.spot = spot || null;
+  // Where they are on the air: the spot clicked (in the list or on the map), or else what the station app found
+  // for them, however they were looked up: their latest spot, or where WSJT-X heard them on FT8.
+  card.fromSpot = !!spot;
+  setOnAir(card, spot ? { spot } : card.on_air);
   state.logBandTouched = false;
   setLogBand(defaultLogBand(card.spot));
-  const tune = $('btn-tune');
-  tune.hidden = !spot || !state.radioOk;
-  if (spot) tune.textContent = `Tune to ${spot.freq_khz.toFixed(1).replace(/\.0$/, '')} ${spotSideband(spot)}`;
+  renderTune();
   renderSplit();
   $('c-call').textContent = card.call;
   const where = [card.qth, card.region, card.country].filter((s, i, all) => s && all.indexOf(s) === i);
@@ -496,7 +498,7 @@ async function logContact() {
       call: card.call, name: card.name, qth: card.qth, grid: card.grid, distance_km: card.distance_km,
       country: card.country, cq: card.cq, itu: card.itu,
       spot_freq_hz: card.spot ? Math.round(card.spot.freq_khz * 1000) : null,
-      mode: card.spot ? spotSideband(card.spot) : null,
+      mode: card.spot ? spotLogMode(card.spot) : null,
       band: $('log-band').value,
     });
     try { localStorage.setItem('logBand', $('log-band').value); } catch (err) { /* only a convenience */ }
@@ -1485,7 +1487,7 @@ async function pollRadio() {
                                                         // while split is on, the box says where it transmits
   state.radioOk = !!r.ok;
   state.radioBand = r.ok ? bandFor(r.freq_hz) : null;
-  if (state.card && state.card.spot) $('btn-tune').hidden = !state.radioOk;
+  if (state.card) renderTune();   // "Tune to" while the radio answers; otherwise where they were spotted
   if (state.card) renderSplit();
   if (state.card && !state.logBandTouched && state.radioBand) setLogBand(state.radioBand);
   if (r.ok && !state.bandChosen) {
@@ -1735,6 +1737,7 @@ async function refreshSpots() {
   try {
     const band = encodeURIComponent(state.band);
     renderSpots(await api.get(`/api/spots?band=${band}&voice=${state.voice ? 1 : 0}`));
+    refreshOnAir();
   } catch (err) { /* keep what is showing */ }
 }
 
@@ -1745,12 +1748,83 @@ function spotSideband(spot) {
   return spot.freq_khz >= 10000 || (spot.freq_khz >= 5250 && spot.freq_khz <= 5450) ? 'USB' : 'LSB';
 }
 
+// The mode to log a contact from a spot in: the sideband for voice, otherwise what the spot names (CW, FT8, ...).
+function spotLogMode(spot) {
+  return spot.mode && spot.mode !== 'USB' && spot.mode !== 'LSB' ? spot.mode : spotSideband(spot);
+}
+
+// The card's "where they are on the air": a spot (the one clicked, or their latest), or else where WSJT-X heard them
+// on FT8 or FT4 in the last 15 minutes ({ft8: {...}}), or nothing known.
+function setOnAir(card, found) {
+  card.spot = (found && found.spot) || null;
+  card.ft8 = card.spot ? null : (found && found.ft8) || null;
+  card.onAirMinutes = (found && found.minutes) || (card.on_air && card.on_air.minutes) || 30;
+}
+
+// What "Tune to" does for the card: where to set the radio, in which sideband, and what to say about it. A voice
+// spot: its frequency and sideband (and split, if they're working it). FT8 or FT4 (a spot, or WSJT-X here): the dial
+// frequency WSJT-X uses, in USB, so WSJT-X shows them. Any other spot (CW...): its frequency, as the spot list does.
+function tuneTarget(card) {
+  const spot = card && card.spot;
+  if (spot) {
+    if (spot.dial_hz) return { hz: spot.dial_hz, mode: 'USB', what: spot.mode, how: 'spotted', at: spot.time, band: spot.band };
+    const voice = spot.mode === 'USB' || spot.mode === 'LSB' || !spot.mode;
+    return { hz: Math.round(spot.freq_khz * 1000), mode: spotSideband(spot), what: voice ? '' : spot.mode, how: 'spotted',
+      at: spot.time, band: spot.band, split: spot.split };
+  }
+  const f = card && card.ft8;
+  if (f && f.dial_hz) return { hz: f.dial_hz, mode: 'USB', what: f.mode || 'FT8', how: 'heard', at: f.time, band: f.band };
+  return null;
+}
+
+const khzText = (hz) => (hz / 1000).toFixed(1).replace(/\.0$/, '');   // 14228000 -> "14228", 14228500 -> "14228.5"
+function spotAgo(iso) {   // whole minutes, as the spot list counts them
+  const min = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 60000));
+  return min < 1 ? 'just now' : `${min} min ago`;
+}
+
+// "Tune to" on the card when there's somewhere to tune to and the radio is connected; otherwise, in its place, why
+// not: when and where they were spotted (the radio isn't connected), or that they haven't been spotted lately.
+function renderTune() {
+  const card = state.card;
+  const button = $('btn-tune'), info = $('tune-info');
+  const t = card ? tuneTarget(card) : null;
+  if (!card) { button.hidden = info.hidden = true; return; }
+  const can = !!t && state.radioOk;
+  button.hidden = !can;
+  info.hidden = can;
+  if (t) {
+    const when = `${t.how} ${spotAgo(t.at)}`;
+    $('tune-main').textContent = `Tune to ${khzText(t.hz)} ${t.mode}`;
+    $('tune-sub').textContent = t.what ? `${t.what}, ${when}` : when;
+    info.textContent = t.how === 'heard'
+      ? `Heard on ${bandLabel(t.band)} ${t.what} ${spotAgo(t.at)}`
+      : `Spotted ${spotAgo(t.at)} on ${khzText(card.spot.freq_khz * 1000)} ${card.spot.mode || spotSideband(card.spot)}`;
+  } else {
+    info.textContent = `Not spotted in the last ${card.onAirMinutes} minutes`;
+  }
+}
+
+// While a card is open that wasn't opened from a spot, ask now and then where they are: "Tune to" turns up once
+// they're spotted (or WSJT-X hears them), and goes once the spot is too old.
+async function refreshOnAir() {
+  const card = state.card;
+  if (!card || card.fromSpot) return;
+  let found;
+  try { found = await api.get('/api/onair?call=' + encodeURIComponent(card.call)); } catch (err) { return; }
+  if (state.card !== card) return;   // another card has opened since
+  setOnAir(card, found);
+  renderTune();
+  renderSplit();
+}
+
 async function tuneToSpot() {
-  const spot = state.card && state.card.spot;
-  if (!spot) return;
-  const mode = spotSideband(spot);
-  const hz = Math.round(spot.freq_khz * 1000);
-  const dx = spot.split && spot.split.tx_khz && !spot.split.why ? Math.round(spot.split.tx_khz * 1000) : null;
+  const card = state.card;
+  const t = card && tuneTarget(card);
+  if (!t) return;
+  const spot = card.spot;
+  const { hz, mode } = t;
+  const dx = t.split && t.split.tx_khz && !t.split.why ? Math.round(t.split.tx_khz * 1000) : null;
   try {
     const r = await api.post('/api/rig/tune', { freq_hz: hz, mode, split_tx_hz: dx });
     let text = 'The radio isn’t connected right now.';
@@ -1762,7 +1836,8 @@ async function tuneToSpot() {
     } else if (r.ok) {
       text = `${r.radio ? 'The ' + r.radio : 'The radio'} is tuned to ${fmtFreq(hz)} ${mode}${r.note ? ', since ' + r.note : ''}.`;
       if (sp && dx) text += ` Split isn’t set: ${sp.why || 'the radio didn’t take it'}.`;
-      else if (spot.split && spot.split.why) text += ` Split isn’t set: ${spot.split.why}.`;
+      else if (t.split && t.split.why) text += ` Split isn’t set: ${t.split.why}.`;
+      if (t.what === 'FT8' || t.what === 'FT4') text += ` WSJT-X shows ${card.call} if they’re still on.`;
       if (sp && sp.off === true) text += ' Split is off.';
       if (sp && sp.off === false) text += ' Split is still on: turn it off on the radio.';
     }
@@ -1791,7 +1866,7 @@ function renderSplit() {
   const r = state.radio || {};
   const on = r.ok && r.split && r.split.on ? r.split : null;
   const spot = card && card.spot;
-  const dx = spot && spot.split;
+  const dx = spot && !spot.dial_hz ? spot.split : null;   // FT8 and FT4 stations don't work split this way
   const tunedHere = !!(spot && r.ok && Math.abs(r.freq_hz - spot.freq_khz * 1000) <= 500);
   if (!card || (!on && !dx)) { box.hidden = true; return; }
   box.hidden = false;

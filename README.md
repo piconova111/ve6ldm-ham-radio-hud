@@ -22,7 +22,9 @@ Travis. The code was written by Claude, Anthropic's AI model, working with Travi
 - It moves to a backup node by itself if a cluster node goes quiet, and tries the first one again every hour.
 - Your radio's frequency, mode and S-meter, read through [Hamlib](https://hamlib.github.io/).
   While you transmit, an ON AIR light, the power going out and the SWR.
-- **Tune to** sends the radio to a spot's frequency and sideband. The app reads and tunes the radio; it never transmits.
+- **Tune to** sends the radio to a spot's frequency and sideband: the spot clicked, or for any station looked up,
+  their latest spot of the last 30 minutes (a station heard on FT8 goes to the FT8 frequency). The app reads and
+  tunes the radio; it never transmits.
 - Working split: spots that say UP 5 or QSX 14.210 are marked, **Tune to** sets the radio to transmit where the DX
   station is listening, and the display shows SPLIT and the transmit frequency, with buttons to move it or turn split off.
   It won't set a transmit frequency outside the band.

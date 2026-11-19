@@ -307,6 +307,15 @@ a { color: var(--vfd); }
 .btn-tune {
   flex: 1; height: 3rem; border-radius: 0.625rem; border: 2px solid var(--vfd);
   background: transparent; color: var(--vfd); font-weight: 700; font-size: 1.0625rem;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.0625rem; line-height: 1.15;
+}
+.tune-sub { font-size: 0.75rem; font-weight: 400; color: var(--soft); }
+.tune-sub:empty { display: none; }
+/* In "Tune to"'s place when there's nowhere to tune to, or the radio isn't connected: why not */
+.tune-info {
+  flex: 1; min-width: 0; height: 3rem; box-sizing: border-box; margin: 0; padding: 0 0.625rem;
+  display: flex; align-items: center; border-radius: 0.625rem; border: 1px dashed var(--line-strong);
+  color: var(--muted); font-size: 0.875rem; line-height: 1.25; overflow: hidden;
 }
 .btn-outline {
   align-self: flex-start; height: 3rem; padding: 0 1.25rem; border-radius: 0.625rem;
