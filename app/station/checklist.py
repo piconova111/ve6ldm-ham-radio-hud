@@ -61,10 +61,13 @@ SECTIONS = [
          "where": "In the radio box, while you transmit.",
          "try": "While you transmit, it shows the power going out and the SWR. Please compare the power with the "
                 "power meter on {the_radio} and write both numbers in the notes. SWR turns amber at 1.5 and red at 2.5."},
-        {"id": "tune", "title": "Tune to a spot",
+        {"id": "tune", "title": "Tune to a spot", "added": "0.15.11",
          "where": "The “Tune to …” button on the station card.",
          "try": "Click a spot under On the air, then press “Tune to”. The radio should jump to that "
-                "frequency and sideband. It only tunes the radio; it never transmits."},
+                "frequency and sideband. It only tunes the radio; it never transmits. New: type a callsign from "
+                "the spot list into the search box instead: its card has “Tune to” too, with how long ago they "
+                "were spotted (a station WSJT-X heard on FT8 gets the FT8 frequency). For a station nobody has "
+                "spotted lately, the card says so."},
         {"id": "split", "title": "Working split",
          "where": "Spots marked UP or DN, the station card, and the radio box.",
          "try": "When a DX station is listening somewhere else (the spot says UP 5, say), its spot is marked UP5 by "

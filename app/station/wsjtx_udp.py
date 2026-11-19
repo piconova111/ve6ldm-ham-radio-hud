@@ -247,8 +247,8 @@ class Listener:
             self.stations[call] = {
                 "call": call, "grid": grid, "lat": lat, "lon": lon, "km": km, "bearing": bearing,
                 "country": place.get("country", ""), "region": place.get("region", "") if not grid else "",
-                "snr": snr, "dt": round(dt, 1), "freq_hz": freq, "band": logbook.band_for(freq), "mode": mode or "FT8",
-                "cq": cq, "t": round(now)}
+                "snr": snr, "dt": round(dt, 1), "freq_hz": freq, "dial_hz": dial, "band": logbook.band_for(freq),
+                "mode": mode or "FT8", "cq": cq, "t": round(now)}
             self.decodes += 1
             self.last = round(now)
             if len(self.stations) > MOST:      # the longest unheard go first
@@ -283,6 +283,22 @@ def mhz(hz):
 
 def _button(band):
     return band[:-1] if band.endswith("m") else band     # WSJT-X's band buttons: "20" for 20 m, "70" for 70 cm
+
+
+def dial_for(freq_hz, mode="FT8"):
+    """The dial frequency for hearing an FT8 (or FT4) station whose signal is at freq_hz (a dial plus WSJT-X's
+    audio offset, as a spot of one says): the FT8 frequency just below it, within 5 kHz (WSJT-X decodes up to
+    5 kHz above its dial), counting the DXpedition ones; else the band's own FT8 frequency; None if neither."""
+    try:
+        freq_hz = int(freq_hz)
+    except (TypeError, ValueError):
+        return None
+    four = (mode or "").upper() == "FT4"
+    dials = set(FT4_DIALS.values()) if four else set(FT8_DIALS.values()) | set(FT8_OTHERS)
+    below = [d for d in dials if d <= freq_hz <= d + 5000]
+    if below:
+        return max(below)
+    return (FT4_DIALS if four else FT8_DIALS).get(logbook.band_for(freq_hz))
 
 
 def quiet_hint(status, wsjtx_open, open_for=None, udp=None, busiest=None, now=None):

@@ -207,6 +207,7 @@ def lookup(raw):
         "distance_km": round(geo.distance_km(CFG.lat, CFG.lon, lat, lon)),
         "history": LOG.history(call),
         "lookups": FAVS.lookups_for(entity.get("name") == "Canada"),
+        "on_air": on_air(call),
     }
 
 
@@ -366,7 +367,27 @@ def new_for_log(item, worked):
     return None
 
 
-def spots_json(band, voice_only, minutes=30):
+SPOT_MINUTES = 30   # how recent a spot has to be for the spot list, and to say where a looked-up station is
+
+
+def spot_item(spot, now, worked):
+    """A spot as the station display shows it: where the station is, how long ago, what it's on (and for FT8 or
+    FT4, the dial frequency to hear it on), whether it's working split, and whether it's a new one for the log."""
+    item = dict(spot, **place_of(spot["call"]))
+    item["time"] = iso(spot["time"])
+    item["age_min"] = max(0, int((now - spot["time"]).total_seconds() // 60))
+    item["mode"] = spot_mode(spot)
+    item["split"] = spot_split(spot)
+    if item["mode"] in ("FT8", "FT4"):
+        item["dial_hz"] = wsjtx_udp.dial_for(round(spot["freq_khz"] * 1000), item["mode"])
+    if item["lat"] is not None:
+        item["bearing"] = round(geo.bearing(CFG.lat, CFG.lon, item["lat"], item["lon"]))
+        item["distance_km"] = round(geo.distance_km(CFG.lat, CFG.lon, item["lat"], item["lon"]))
+    item["new"] = new_for_log(item, worked)
+    return item
+
+
+def spots_json(band, voice_only, minutes=SPOT_MINUTES):
     if CLUSTER is None:   # no callsign yet (a node needs one to sign in), or no node set
         return {"status": "off" if CFG.callsign_set else "no callsign", "spots": [], "counts": {}}
     now = datetime.now(timezone.utc)
@@ -380,17 +401,41 @@ def spots_json(band, voice_only, minutes=30):
         counts[spot["band"]] = counts.get(spot["band"], 0) + 1
         if band not in ("all", spot["band"]):
             continue
-        item = dict(spot, **place_of(spot["call"]))
-        item["time"] = iso(spot["time"])
-        item["age_min"] = max(0, int((now - spot["time"]).total_seconds() // 60))
-        item["mode"] = spot_mode(spot)
-        item["split"] = spot_split(spot)
-        if item["lat"] is not None:
-            item["bearing"] = round(geo.bearing(CFG.lat, CFG.lon, item["lat"], item["lon"]))
-            item["distance_km"] = round(geo.distance_km(CFG.lat, CFG.lon, item["lat"], item["lon"]))
-        item["new"] = new_for_log(item, worked)
-        out.append(item)
+        out.append(spot_item(spot, now, worked))
     return {"status": CLUSTER.status, "node": CLUSTER.host, "spots": out[:60], "counts": counts}
+
+
+def on_air(call):
+    """Where a station is on the air now, for "Tune to" on its card however it was looked up: its newest voice
+    spot of the last 30 minutes; else where it was heard on FT8 or FT4, by WSJT-X here (the last 15 minutes) or
+    in a spot, whichever is newer; else its newest spot in another mode (CW, RTTY...). The same station spotted
+    portable counts (W1AW/4 for W1AW, and the other way round). {"spot": ...} or {"ft8": ...} (what WSJT-X heard,
+    with the dial frequency it was on), or neither when it hasn't been spotted or heard: there's then no frequency
+    to tune to. Never the station's own call."""
+    call = (call or "").strip().upper()
+    found = {"spot": None, "ft8": None, "minutes": SPOT_MINUTES}
+    if not valid_call(call) or home_call(call) == CFG.callsign:
+        return found
+    home = home_call(call)
+    same = lambda other: other == call or home_call(other) == home   # noqa: E731
+    now = datetime.now(timezone.utc)
+    spots = [s for s in (CLUSTER.spots(SPOT_MINUTES) if CLUSTER else []) if same(s["call"])]   # newest first
+    voice = [s for s in spots if is_voice(s)]
+    digital = [s for s in spots if spot_mode(s) in ("FT8", "FT4")]
+    heard = None
+    if FT8_HEARD is not None:
+        heard = next((s for s in FT8_HEARD.status()["stations"] if same(s["call"]) and s.get("dial_hz")), None)
+    worked = worked_now() if spots else None
+    if voice:
+        found["spot"] = spot_item(voice[0], now, worked)
+    elif heard and (not digital or heard["t"] >= digital[0]["time"].timestamp()):
+        found["ft8"] = dict(heard, time=iso(datetime.fromtimestamp(heard["t"], timezone.utc)),
+                            age_min=max(0, int((now.timestamp() - heard["t"]) // 60)))
+    elif digital:
+        found["spot"] = spot_item(digital[0], now, worked)
+    elif spots:
+        found["spot"] = spot_item(spots[0], now, worked)
+    return found
 
 
 def heard_json(hours=24):
@@ -1186,6 +1231,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(settings())
             if path == "/api/lookup":
                 return self._json(lookup(query.get("call", [""])[0]))
+            if path == "/api/onair":   # an open card asks again now and then, so "Tune to" shows up once they're spotted
+                return self._json(on_air(query.get("call", [""])[0]))
             if path == "/api/rig":
                 if query.get("from") == ["display"]:
                     SCREEN.seen()   # the station display's page is alive
